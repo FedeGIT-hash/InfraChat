@@ -25,10 +25,10 @@ function sendConfig(_req, res) {
 app.get('/config', sendConfig);
 app.get('/api/config', sendConfig);
 
-app.use(express.static(path.resolve(__dirname)));
+app.use(express.static(path.resolve(__dirname, 'public')));
 
 app.get('*', (_req, res) => {
-  res.sendFile(path.resolve(__dirname, 'index.html'));
+  res.sendFile(path.resolve(__dirname, 'public', 'index.html'));
 });
 
 if (require.main === module) {
