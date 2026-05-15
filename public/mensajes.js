@@ -28,6 +28,7 @@ const state = {
   users: [],
   realtimeChannel: null,
   seenMessageIds: new Set(),
+  activeChat: { type: 'general', peerId: null, peerUsername: null },
 };
 
 const fallbackConfig = {
@@ -57,6 +58,43 @@ function formatTime(value) {
 function firstLetter(name) {
   const v = String(name || '').trim();
   return v ? v[0].toUpperCase() : '?';
+}
+
+function makeDmRoom(a, b) {
+  const id1 = String(a || '');
+  const id2 = String(b || '');
+  if (!id1 || !id2) return 'general';
+  return id1 < id2 ? `dm_${id1}_${id2}` : `dm_${id2}_${id1}`;
+}
+
+function saveActiveChat() {
+  try {
+    const payload = {
+      type: state.activeChat.type,
+      peerId: state.activeChat.peerId,
+      peerUsername: state.activeChat.peerUsername,
+    };
+    localStorage.setItem('infrachat_active_chat', JSON.stringify(payload));
+  } catch {
+    return;
+  }
+}
+
+function loadActiveChat() {
+  try {
+    const raw = localStorage.getItem('infrachat_active_chat');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (parsed.type !== 'dm' && parsed.type !== 'general') return null;
+    return {
+      type: parsed.type,
+      peerId: parsed.peerId || null,
+      peerUsername: parsed.peerUsername || null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function addSystemMessage(text) {
@@ -104,11 +142,41 @@ function renderUsers(users) {
   ui.usersList.innerHTML = '';
 
   const meId = state.session?.user?.id || null;
+  const q = String(ui.userSearch.value || '').trim().toLowerCase();
   const filtered = users.filter((u) => {
-    const q = String(ui.userSearch.value || '').trim().toLowerCase();
     if (!q) return true;
     return String(u.username || '').toLowerCase().includes(q);
   });
+
+  if (!q) {
+    const general = document.createElement('div');
+    general.className = `contact ${state.activeChat.type === 'general' ? 'active' : ''}`;
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar online';
+    avatar.textContent = 'G';
+
+    const info = document.createElement('div');
+    info.className = 'contact-info';
+
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = 'General';
+
+    const preview = document.createElement('div');
+    preview.className = 'preview';
+    preview.textContent = 'Sala general';
+
+    info.appendChild(name);
+    info.appendChild(preview);
+    general.appendChild(avatar);
+    general.appendChild(info);
+    general.addEventListener('click', () => {
+      setActiveChat({ type: 'general', peerId: null, peerUsername: null });
+    });
+
+    ui.usersList.appendChild(general);
+  }
 
   if (filtered.length === 0) {
     const empty = document.createElement('div');
@@ -130,7 +198,8 @@ function renderUsers(users) {
 
   for (const u of filtered) {
     const row = document.createElement('div');
-    row.className = 'contact';
+    const isPeer = state.activeChat.type === 'dm' && state.activeChat.peerId === u.id;
+    row.className = `contact ${isPeer ? 'active' : ''}`;
 
     const avatar = document.createElement('div');
     avatar.className = 'avatar';
@@ -151,8 +220,39 @@ function renderUsers(users) {
     info.appendChild(preview);
     row.appendChild(avatar);
     row.appendChild(info);
+    row.addEventListener('click', () => {
+      if (!u.id || u.id === meId) return;
+      setActiveChat({ type: 'dm', peerId: u.id, peerUsername: u.username || 'Usuario' });
+    });
     ui.usersList.appendChild(row);
   }
+}
+
+async function setActiveChat(next) {
+  const meId = state.session?.user?.id || null;
+  if (next.type === 'dm') {
+    if (!meId || !next.peerId) return;
+    state.activeChat = {
+      type: 'dm',
+      peerId: next.peerId,
+      peerUsername: next.peerUsername || 'Usuario',
+    };
+    state.room = makeDmRoom(meId, next.peerId);
+    ui.roomName.textContent = state.activeChat.peerUsername || 'Chat';
+  } else {
+    state.activeChat = { type: 'general', peerId: null, peerUsername: null };
+    state.room = 'general';
+    ui.roomName.textContent = 'General';
+  }
+
+  saveActiveChat();
+  renderUsers(state.users);
+  closeSidebar();
+  ui.roomStatus.textContent = 'Cargando…';
+  teardownRealtime();
+  await loadMessages();
+  setupRealtime();
+  requestAnimationFrame(() => scrollMessagesToBottom());
 }
 
 async function loadUsers() {
@@ -359,13 +459,22 @@ async function init() {
     if (!session) goToLogin();
   });
 
-  ui.roomName.textContent = state.room === 'general' ? 'General' : state.room;
-  ui.roomStatus.textContent = 'Cargando…';
-
   try {
     await loadProfile();
-    await Promise.all([loadUsers(), loadMessages()]);
-    setupRealtime();
+    await loadUsers();
+
+    const restored = loadActiveChat();
+    if (restored?.type === 'dm' && restored.peerId && restored.peerId !== state.session.user.id) {
+      const found = state.users.find((u) => u.id === restored.peerId);
+      await setActiveChat({
+        type: 'dm',
+        peerId: restored.peerId,
+        peerUsername: found?.username || restored.peerUsername || 'Usuario',
+      });
+      return;
+    }
+
+    await setActiveChat({ type: 'general', peerId: null, peerUsername: null });
     requestAnimationFrame(() => scrollMessagesToBottom());
   } catch (e) {
     teardownRealtime();
@@ -375,4 +484,3 @@ async function init() {
 }
 
 init();
-
