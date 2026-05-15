@@ -1,8 +1,0 @@
-{
-  "version": 2,
-  "routes": [
-    { "handle": "filesystem" },
-    { "src": "/api/config", "dest": "/api/config.js" },
-    { "src": "/", "dest": "/login.html" }
-  ]
-}
