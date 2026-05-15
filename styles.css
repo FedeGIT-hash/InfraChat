@@ -85,6 +85,12 @@ body {
   padding: 24px 16px;
 }
 
+.login-wrap {
+  width: min(520px, 100%);
+  display: grid;
+  gap: 14px;
+}
+
 .auth-card {
   width: min(420px, 100%);
   background: rgba(31, 4, 10, 0.75);
@@ -636,4 +642,3 @@ body {
     animation: none !important;
   }
 }
-
