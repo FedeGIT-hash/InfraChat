@@ -28,6 +28,11 @@ const state = {
   session: null,
 };
 
+function setAuthEnabled(enabled) {
+  ui.loginBtn.disabled = !enabled;
+  ui.signupBtn.disabled = !enabled || !state.config?.enableSignup;
+}
+
 function setHint(target, text, tone = 'muted') {
   target.textContent = text || '';
   if (!text) return;
@@ -53,6 +58,7 @@ function goToMensajes() {
 }
 
 async function signIn(email, password) {
+  if (!state.supabase) throw new Error('Configuración no lista. Recarga la página.');
   ui.loginBtn.disabled = true;
   setHint(ui.authHint, 'Verificando…');
 
@@ -67,6 +73,7 @@ async function signIn(email, password) {
 }
 
 async function signUp(email, password, username) {
+  if (!state.supabase) throw new Error('Configuración no lista. Recarga la página.');
   const cleanEmail = String(email || '').trim();
   const cleanPassword = String(password || '');
   const cleanUsername = String(username || '').trim();
@@ -135,22 +142,41 @@ async function init() {
   wireUi();
   switchTab('login');
 
-  const res = await fetch('/api/config', { cache: 'no-store' });
-  state.config = await res.json();
+  setAuthEnabled(false);
+  setHint(ui.authHint, 'Cargando…');
+
+  let res;
+  try {
+    res = await fetch('/api/config', { cache: 'no-store' });
+  } catch {
+    setHint(ui.authHint, 'No se pudo conectar con /api/config. Intenta recargar.', 'error');
+    return;
+  }
+
+  if (!res.ok) {
+    setHint(ui.authHint, `Error /api/config (${res.status}).`, 'error');
+    return;
+  }
+
+  try {
+    state.config = await res.json();
+  } catch {
+    setHint(ui.authHint, 'Respuesta inválida de /api/config.', 'error');
+    return;
+  }
 
   if (!state.config?.supabaseUrl || !state.config?.supabaseAnonKey) {
-    ui.loginBtn.disabled = true;
-    ui.signupBtn.disabled = true;
     setHint(ui.authHint, 'Falta configurar SUPABASE_URL y SUPABASE_ANON_KEY en Vercel.', 'error');
     return;
   }
 
-  ui.signupBtn.disabled = !state.config.enableSignup;
   if (!state.config.enableSignup) setHint(ui.signupHint, 'Registro desactivado.', 'muted');
 
   state.supabase = createClient(state.config.supabaseUrl, state.config.supabaseAnonKey, {
     auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   });
+  setAuthEnabled(true);
+  setHint(ui.authHint, '');
 
   const { data } = await state.supabase.auth.getSession();
   state.session = data.session;
@@ -166,4 +192,3 @@ async function init() {
 }
 
 init();
-

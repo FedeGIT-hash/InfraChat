@@ -313,8 +313,25 @@ function wireUi() {
 async function init() {
   wireUi();
 
-  const res = await fetch('/api/config', { cache: 'no-store' });
-  state.config = await res.json();
+  let res;
+  try {
+    res = await fetch('/api/config', { cache: 'no-store' });
+  } catch {
+    addSystemMessage('No se pudo conectar con /api/config. Intenta recargar.');
+    return;
+  }
+
+  if (!res.ok) {
+    addSystemMessage(`Error /api/config (${res.status}).`);
+    return;
+  }
+
+  try {
+    state.config = await res.json();
+  } catch {
+    addSystemMessage('Respuesta inválida de /api/config.');
+    return;
+  }
 
   if (!state.config?.supabaseUrl || !state.config?.supabaseAnonKey) {
     addSystemMessage('Falta configurar SUPABASE_URL y SUPABASE_ANON_KEY en Vercel.');
@@ -353,4 +370,3 @@ async function init() {
 }
 
 init();
-
