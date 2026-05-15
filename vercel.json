@@ -1,10 +1,8 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "api/**/*.js", "use": "@vercel/node" },
-    { "src": "*.html", "use": "@vercel/static" },
-    { "src": "*.css", "use": "@vercel/static" },
-    { "src": "*.js", "use": "@vercel/static" }
-  ],
-  "rewrites": [{ "source": "/", "destination": "/login.html" }]
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/api/config", "dest": "/api/config.js" },
+    { "src": "/", "dest": "/login.html" }
+  ]
 }
