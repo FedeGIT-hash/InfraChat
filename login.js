@@ -28,6 +28,12 @@ const state = {
   session: null,
 };
 
+const fallbackConfig = {
+  supabaseUrl: '',
+  supabaseAnonKey: '',
+  enableSignup: true,
+};
+
 function setAuthEnabled(enabled) {
   ui.loginBtn.disabled = !enabled;
   ui.signupBtn.disabled = !enabled || !state.config?.enableSignup;
@@ -145,24 +151,23 @@ async function init() {
   setAuthEnabled(false);
   setHint(ui.authHint, 'Cargando…');
 
-  let res;
+  let res = null;
   try {
     res = await fetch('/api/config', { cache: 'no-store' });
   } catch {
-    setHint(ui.authHint, 'No se pudo conectar con /api/config. Intenta recargar.', 'error');
-    return;
+    res = null;
   }
 
-  if (!res.ok) {
-    setHint(ui.authHint, `Error /api/config (${res.status}).`, 'error');
-    return;
+  if (res && res.ok) {
+    try {
+      state.config = await res.json();
+    } catch {
+      state.config = null;
+    }
   }
 
-  try {
-    state.config = await res.json();
-  } catch {
-    setHint(ui.authHint, 'Respuesta inválida de /api/config.', 'error');
-    return;
+  if (!state.config?.supabaseUrl || !state.config?.supabaseAnonKey) {
+    state.config = fallbackConfig;
   }
 
   if (!state.config?.supabaseUrl || !state.config?.supabaseAnonKey) {

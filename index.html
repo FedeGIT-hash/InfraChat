@@ -4,12 +4,86 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>InfraChat</title>
-  <meta http-equiv="refresh" content="0; url=/login.html" />
+  <title>InfraChat · Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@300;400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 
 <body>
-  <a href="/login.html">Ir al login</a>
+  <div class="viewport">
+    <section class="auth" aria-label="Autenticación">
+      <div class="login-wrap">
+        <div class="auth-card">
+          <header class="auth-brand">
+            <div class="logo">I</div>
+            <div class="logo-text">
+              <h1>InfraChat</h1>
+              <p>MESSAGING · SYSTEMS</p>
+            </div>
+          </header>
+
+          <div class="tabs" role="tablist" aria-label="Auth Tabs">
+            <button class="tab active" id="tab-login" type="button" role="tab" aria-selected="true">Login</button>
+            <button class="tab" id="tab-registro" type="button" role="tab" aria-selected="false">Registro</button>
+          </div>
+
+          <div class="tab-panels">
+            <div class="panel active" id="panel-login" role="tabpanel" aria-labelledby="tab-login">
+              <form class="form" id="loginForm">
+                <label class="field">
+                  <span>Email</span>
+                  <input id="loginEmail" type="email" autocomplete="email" required />
+                </label>
+                <label class="field">
+                  <span>Contraseña</span>
+                  <input id="loginPassword" type="password" autocomplete="current-password" required />
+                </label>
+
+                <button class="btn primary" id="loginBtn" type="submit">Entrar</button>
+                <p class="hint" id="authHint"></p>
+              </form>
+            </div>
+
+            <div class="panel" id="panel-registro" role="tabpanel" aria-labelledby="tab-registro">
+              <div class="info-box">
+                <p class="muted">
+                  Crea tu cuenta con email y contraseña.
+                </p>
+                <p class="muted">
+                  El perfil se guarda en <strong>public.usuarios</strong> automáticamente al registrarte.
+                </p>
+              </div>
+
+              <form class="form" id="signupForm">
+                <label class="field">
+                  <span>Email</span>
+                  <input id="signupEmail" type="email" autocomplete="email" required />
+                </label>
+                <label class="field">
+                  <span>Contraseña</span>
+                  <input id="signupPassword" type="password" autocomplete="new-password" required />
+                </label>
+                <label class="field">
+                  <span>Username</span>
+                  <input id="signupUsername" type="text" autocomplete="username" required />
+                </label>
+
+                <button class="btn" id="signupBtn" type="submit">Crear cuenta</button>
+                <p class="hint" id="signupHint"></p>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="login.js"></script>
 </body>
 
 </html>

@@ -30,6 +30,12 @@ const state = {
   seenMessageIds: new Set(),
 };
 
+const fallbackConfig = {
+  supabaseUrl: '',
+  supabaseAnonKey: '',
+  enableSignup: true,
+};
+
 function goToLogin() {
   window.location.assign('/login.html');
 }
@@ -313,24 +319,23 @@ function wireUi() {
 async function init() {
   wireUi();
 
-  let res;
+  let res = null;
   try {
     res = await fetch('/api/config', { cache: 'no-store' });
   } catch {
-    addSystemMessage('No se pudo conectar con /api/config. Intenta recargar.');
-    return;
+    res = null;
   }
 
-  if (!res.ok) {
-    addSystemMessage(`Error /api/config (${res.status}).`);
-    return;
+  if (res && res.ok) {
+    try {
+      state.config = await res.json();
+    } catch {
+      state.config = null;
+    }
   }
 
-  try {
-    state.config = await res.json();
-  } catch {
-    addSystemMessage('Respuesta inválida de /api/config.');
-    return;
+  if (!state.config?.supabaseUrl || !state.config?.supabaseAnonKey) {
+    state.config = fallbackConfig;
   }
 
   if (!state.config?.supabaseUrl || !state.config?.supabaseAnonKey) {
