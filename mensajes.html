@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>InfraChat · Mensajes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@300;400;500&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+
+<body>
+  <div class="viewport">
+    <section class="app" aria-label="Chat">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <div class="logo">I</div>
+          <div class="logo-text">
+            <h1>InfraChat</h1>
+            <p id="meLine">Conectando…</p>
+          </div>
+          <button class="icon-btn mobile-only" id="closeSidebarBtn" type="button" aria-label="Cerrar menú">✕</button>
+        </div>
+
+        <div class="search-bar">
+          <input id="userSearch" type="text" placeholder="Buscar usuario…" />
+        </div>
+
+        <div class="contacts" id="usersList" aria-label="Usuarios"></div>
+      </aside>
+
+      <main class="chat-area">
+        <div class="chat-header">
+          <button class="icon-btn mobile-only" id="openSidebarBtn" type="button" aria-label="Abrir menú">☰</button>
+          <div class="avatar online" id="roomAvatar">G</div>
+          <div class="chat-header-info">
+            <div class="name" id="roomName">General</div>
+            <div class="status" id="roomStatus">Conectado</div>
+          </div>
+          <div class="chat-header-actions">
+            <button class="pill" id="signOutBtn" type="button">Salir</button>
+          </div>
+        </div>
+
+        <div class="messages" id="messages" aria-label="Mensajes"></div>
+
+        <form class="chat-input" id="sendForm">
+          <div class="input-wrap">
+            <textarea id="msgInput" rows="1" placeholder="Escribe un mensaje…" maxlength="1000"></textarea>
+          </div>
+          <button class="send-btn" id="sendBtn" type="submit" title="Enviar">➤</button>
+        </form>
+      </main>
+    </section>
+  </div>
+
+  <script type="module" src="/mensajes.js"></script>
+</body>
+
+</html>
+
