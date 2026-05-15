@@ -1,4 +1,4 @@
-export default function handler(req, res) {
+module.exports = function handler(req, res) {
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
@@ -11,5 +11,4 @@ export default function handler(req, res) {
     supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
     enableSignup: String(process.env.ENABLE_SIGNUP || '').toLowerCase() === 'true',
   });
-}
-
+};
