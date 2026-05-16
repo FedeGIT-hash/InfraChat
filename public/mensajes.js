@@ -14,6 +14,17 @@ const ui = {
   msgInput: el('msgInput'),
   sendBtn: el('sendBtn'),
   signOutBtn: el('signOutBtn'),
+  callBtn: el('callBtn'),
+  callOverlay: el('callOverlay'),
+  callAvatar: el('callAvatar'),
+  callTitle: el('callTitle'),
+  callSub: el('callSub'),
+  callAcceptBtn: el('callAcceptBtn'),
+  callRejectBtn: el('callRejectBtn'),
+  callHangBtn: el('callHangBtn'),
+  callMuteBtn: el('callMuteBtn'),
+  callHint: el('callHint'),
+  remoteAudio: el('remoteAudio'),
 
   userSearch: el('userSearch'),
   searchUserBtn: el('searchUserBtn'),
@@ -40,11 +51,29 @@ const state = {
   realtimeChannel: null,
   inboxChannel: null,
   socialChannel: null,
+  callInboxChannel: null,
   socialRefreshTimer: null,
   seenMessageIds: new Set(),
   activeChat: { type: 'none', peerId: null, peerUsername: null, peerAvatarUrl: null, peerBio: null },
   typingUsers: {},
   unreadByRoom: {},
+  incomingCallsByPeer: {},
+  callIgnoreIds: {},
+  call: {
+    status: 'idle',
+    id: null,
+    peerId: null,
+    peerUsername: null,
+    peerAvatarUrl: null,
+    direction: null,
+    channel: null,
+    pc: null,
+    localStream: null,
+    remoteStream: null,
+    muted: false,
+    pendingOffer: null,
+    pendingRemoteCandidates: [],
+  },
 };
 
 const fallbackConfig = {
@@ -144,6 +173,462 @@ function parseDmOtherId(room, myId) {
   if (a === myId) return b;
   if (b === myId) return a;
   return null;
+}
+
+function showCallHint(text, tone = 'muted') {
+  if (!ui.callHint) return;
+  ui.callHint.textContent = text || '';
+  if (!text) {
+    ui.callHint.style.color = '';
+    return;
+  }
+  if (tone === 'error') ui.callHint.style.color = 'rgba(255, 180, 180, 0.95)';
+  if (tone === 'ok') ui.callHint.style.color = 'rgba(170, 255, 200, 0.95)';
+  if (tone === 'muted') ui.callHint.style.color = '';
+}
+
+function setCallOverlayVisible(visible) {
+  ui.callOverlay.classList.toggle('hidden', !visible);
+}
+
+function setCallUi(mode) {
+  ui.callAcceptBtn.classList.add('hidden');
+  ui.callRejectBtn.classList.add('hidden');
+  ui.callHangBtn.classList.add('hidden');
+  ui.callMuteBtn.classList.add('hidden');
+
+  if (mode === 'incoming') {
+    ui.callAcceptBtn.classList.remove('hidden');
+    ui.callRejectBtn.classList.remove('hidden');
+  }
+  if (mode === 'outgoing') {
+    ui.callHangBtn.classList.remove('hidden');
+  }
+  if (mode === 'in_call') {
+    ui.callHangBtn.classList.remove('hidden');
+    ui.callMuteBtn.classList.remove('hidden');
+  }
+}
+
+async function sendBroadcast(channelName, event, payload, timeoutMs = 2200) {
+  const ch = state.supabase.channel(channelName);
+  let subscribed = false;
+  const done = new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    ch.subscribe((status) => {
+      if (status !== 'SUBSCRIBED') return;
+      if (subscribed) return;
+      subscribed = true;
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+
+  const ok = await done;
+  if (!ok) {
+    state.supabase.removeChannel(ch);
+    return false;
+  }
+
+  try {
+    await ch.send({ type: 'broadcast', event, payload });
+  } finally {
+    state.supabase.removeChannel(ch);
+  }
+  return true;
+}
+
+function callChannelName(callId) {
+  return `call:${callId}`;
+}
+
+function cleanupCallState() {
+  if (state.call.pc) {
+    try {
+      state.call.pc.onicecandidate = null;
+      state.call.pc.ontrack = null;
+      state.call.pc.onconnectionstatechange = null;
+      state.call.pc.close();
+    } catch {
+      return;
+    }
+  }
+
+  if (state.call.channel) {
+    state.supabase.removeChannel(state.call.channel);
+  }
+
+  if (state.call.localStream) {
+    for (const t of state.call.localStream.getTracks()) t.stop();
+  }
+
+  state.call = {
+    status: 'idle',
+    id: null,
+    peerId: null,
+    peerUsername: null,
+    peerAvatarUrl: null,
+    direction: null,
+    channel: null,
+    pc: null,
+    localStream: null,
+    remoteStream: null,
+    muted: false,
+    pendingOffer: null,
+    pendingRemoteCandidates: [],
+  };
+
+  setCallOverlayVisible(false);
+  showCallHint('');
+  if (ui.remoteAudio) ui.remoteAudio.srcObject = null;
+  if (ui.callMuteBtn) ui.callMuteBtn.textContent = 'Silenciar';
+}
+
+function newCallId() {
+  try {
+    if (crypto?.randomUUID) return crypto.randomUUID();
+  } catch {
+    return `call_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+  }
+  return `call_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+}
+
+function setCallCard(peerUsername, peerAvatarUrl, title, sub) {
+  setAvatar(ui.callAvatar, peerAvatarUrl, peerUsername);
+  ui.callTitle.textContent = title || 'Llamada';
+  ui.callSub.textContent = sub || '';
+}
+
+function isCallActive() {
+  return state.call.status !== 'idle';
+}
+
+function rememberIgnoredCall(callId) {
+  const id = String(callId || '').trim();
+  if (!id) return;
+  if (!state.callIgnoreIds) state.callIgnoreIds = {};
+  state.callIgnoreIds[id] = Date.now();
+}
+
+function isIgnoredCall(callId) {
+  const id = String(callId || '').trim();
+  if (!id) return false;
+  if (!state.callIgnoreIds) state.callIgnoreIds = {};
+  const now = Date.now();
+  for (const [k, v] of Object.entries(state.callIgnoreIds)) {
+    if (!v || now - v > 60_000) delete state.callIgnoreIds[k];
+  }
+  return Boolean(state.callIgnoreIds[id]);
+}
+
+function rtcConfig() {
+  return {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ],
+  };
+}
+
+async function waitForIceGatheringComplete(pc, timeoutMs = 3200) {
+  if (!pc) return;
+  if (pc.iceGatheringState === 'complete') return;
+  await new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      try {
+        pc.removeEventListener('icegatheringstatechange', onChange);
+      } catch {
+        resolve();
+        return;
+      }
+      resolve();
+    };
+    const onChange = () => {
+      if (pc.iceGatheringState === 'complete') finish();
+    };
+    try {
+      pc.addEventListener('icegatheringstatechange', onChange);
+    } catch {
+      resolve();
+      return;
+    }
+    setTimeout(finish, timeoutMs);
+  });
+}
+
+async function getLocalAudioStream() {
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+    video: false,
+  });
+}
+
+async function primeRemoteAudio() {
+  if (!ui.remoteAudio) return;
+  try {
+    const wasMuted = ui.remoteAudio.muted;
+    ui.remoteAudio.muted = true;
+    await ui.remoteAudio.play();
+    ui.remoteAudio.pause();
+    ui.remoteAudio.muted = wasMuted;
+  } catch {
+    return;
+  }
+}
+
+function wirePeerConnection(pc) {
+  pc.ontrack = (ev) => {
+    const stream = ev.streams?.[0];
+    if (!stream) return;
+    state.call.remoteStream = stream;
+    if (ui.remoteAudio) ui.remoteAudio.srcObject = stream;
+  };
+
+  pc.onconnectionstatechange = () => {
+    const s = pc.connectionState;
+    if (s === 'connected') {
+      state.call.status = 'in_call';
+      setCallUi('in_call');
+      showCallHint('En llamada', 'ok');
+      return;
+    }
+    if (s === 'failed' || s === 'disconnected' || s === 'closed') {
+      const peer = state.call.peerUsername || 'Usuario';
+      cleanupCallState();
+      addSystemMessage(`Llamada finalizada con ${peer}.`);
+    }
+  };
+}
+
+async function safeAddIceCandidate(pc, candidate) {
+  if (!pc || !candidate) return;
+  try {
+    await pc.addIceCandidate(candidate);
+  } catch {
+    return;
+  }
+}
+
+async function flushPendingCandidates() {
+  const pc = state.call.pc;
+  if (!pc) return;
+  if (!pc.remoteDescription) return;
+  const list = Array.isArray(state.call.pendingRemoteCandidates) ? state.call.pendingRemoteCandidates : [];
+  state.call.pendingRemoteCandidates = [];
+  for (const c of list) await safeAddIceCandidate(pc, c);
+}
+
+async function sendCallEvent(toId, event, payload) {
+  if (!toId) return false;
+  return sendBroadcast(`calls:${toId}`, event, payload);
+}
+
+async function hangupCall(shouldNotifyPeer = true) {
+  const meId = state.session?.user?.id || null;
+  const peerId = state.call.peerId;
+  const callId = state.call.id;
+  if (shouldNotifyPeer && meId && peerId && callId) {
+    await sendCallEvent(peerId, 'call:hangup', { callId, fromId: meId, toId: peerId });
+  }
+  setIncomingBadge(peerId, false);
+  cleanupCallState();
+}
+
+function setIncomingBadge(peerId, on) {
+  if (!peerId) return;
+  if (!state.incomingCallsByPeer) state.incomingCallsByPeer = {};
+  if (on) state.incomingCallsByPeer[peerId] = true;
+  else if (state.incomingCallsByPeer[peerId]) delete state.incomingCallsByPeer[peerId];
+  renderFriends();
+}
+
+async function startOutgoingCall() {
+  const meId = state.session?.user?.id || null;
+  if (!meId) return;
+  if (state.activeChat.type !== 'dm' || !state.activeChat.peerId) {
+    addSystemMessage('Selecciona un amigo para llamar.');
+    return;
+  }
+  if (isCallActive()) {
+    addSystemMessage('Ya estás en una llamada.');
+    return;
+  }
+
+  const peerId = state.activeChat.peerId;
+  const friend = state.friends.find((f) => f.id === peerId) || null;
+  if (!friend) {
+    addSystemMessage('Solo puedes llamar a tus amigos.');
+    return;
+  }
+
+  const callId = newCallId();
+  if (state.callIgnoreIds?.[callId]) delete state.callIgnoreIds[callId];
+  state.call.status = 'calling';
+  state.call.id = callId;
+  state.call.peerId = peerId;
+  state.call.peerUsername = friend.username || 'Usuario';
+  state.call.peerAvatarUrl = friend.avatar_url || '';
+  state.call.direction = 'outgoing';
+  state.call.pendingOffer = null;
+  state.call.pendingRemoteCandidates = [];
+
+  setCallOverlayVisible(true);
+  setCallUi('outgoing');
+  setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Llamando…', 'Pidiendo conexión al micrófono…');
+  showCallHint('Permite el micrófono para iniciar la llamada.', 'muted');
+  await primeRemoteAudio();
+
+  let localStream = null;
+  try {
+    localStream = await getLocalAudioStream();
+  } catch (e) {
+    showCallHint('No se pudo usar el micrófono.', 'error');
+    addSystemMessage(e?.message || 'No se pudo usar el micrófono.');
+    await hangupCall(false);
+    return;
+  }
+
+  const pc = new RTCPeerConnection(rtcConfig());
+  state.call.pc = pc;
+  state.call.localStream = localStream;
+  wirePeerConnection(pc);
+  for (const t of localStream.getTracks()) pc.addTrack(t, localStream);
+
+  const gathered = [];
+  pc.onicecandidate = (ev) => {
+    if (ev.candidate) gathered.push(ev.candidate);
+  };
+
+  try {
+    setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Llamando…', 'Creando oferta…');
+    const offer = await pc.createOffer({ offerToReceiveAudio: true });
+    await pc.setLocalDescription(offer);
+    setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Llamando…', 'Buscando ruta de conexión…');
+    await waitForIceGatheringComplete(pc);
+
+    const desc = pc.localDescription;
+    if (!desc?.sdp) throw new Error('Oferta inválida.');
+
+    const ok = await sendCallEvent(peerId, 'call:invite', {
+      callId,
+      fromId: meId,
+      fromUsername: state.profile?.username || 'Usuario',
+      fromAvatarUrl: state.profile?.avatar_url || '',
+      toId: peerId,
+      offer: { type: desc.type, sdp: desc.sdp },
+      candidates: gathered,
+    });
+
+    if (!ok) {
+      showCallHint('No se pudo enviar la llamada.', 'error');
+      await hangupCall(false);
+      return;
+    }
+
+    setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Llamando…', 'Esperando respuesta…');
+    showCallHint('', 'muted');
+  } catch (e) {
+    showCallHint('No se pudo iniciar la llamada.', 'error');
+    addSystemMessage(e?.message || 'No se pudo iniciar la llamada.');
+    await hangupCall(false);
+  }
+}
+
+async function acceptIncomingCall() {
+  const meId = state.session?.user?.id || null;
+  const callId = state.call.id;
+  const peerId = state.call.peerId;
+  const offer = state.call.pendingOffer;
+  if (!meId || !callId || !peerId || !offer) return;
+  if (state.call.status !== 'incoming') return;
+  if (state.callIgnoreIds?.[callId]) delete state.callIgnoreIds[callId];
+
+  state.call.status = 'connecting';
+  setIncomingBadge(peerId, false);
+  setCallUi('in_call');
+  setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Conectando…', 'Pidiendo micrófono…');
+  showCallHint('Permite el micrófono para contestar.', 'muted');
+  await primeRemoteAudio();
+
+  let localStream = null;
+  try {
+    localStream = await getLocalAudioStream();
+  } catch (e) {
+    showCallHint('No se pudo usar el micrófono.', 'error');
+    addSystemMessage(e?.message || 'No se pudo usar el micrófono.');
+    await sendCallEvent(peerId, 'call:reject', { callId, fromId: meId, toId: peerId, reason: 'mic_denied' });
+    await hangupCall(false);
+    return;
+  }
+
+  const pc = new RTCPeerConnection(rtcConfig());
+  state.call.pc = pc;
+  state.call.localStream = localStream;
+  wirePeerConnection(pc);
+  for (const t of localStream.getTracks()) pc.addTrack(t, localStream);
+
+  const gathered = [];
+  pc.onicecandidate = (ev) => {
+    if (ev.candidate) gathered.push(ev.candidate);
+  };
+
+  try {
+    await pc.setRemoteDescription(offer);
+    await flushPendingCandidates();
+    setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Conectando…', 'Creando respuesta…');
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Conectando…', 'Buscando ruta de conexión…');
+    await waitForIceGatheringComplete(pc);
+
+    const desc = pc.localDescription;
+    if (!desc?.sdp) throw new Error('Respuesta inválida.');
+
+    await sendCallEvent(peerId, 'call:accept', {
+      callId,
+      fromId: meId,
+      toId: peerId,
+      answer: { type: desc.type, sdp: desc.sdp },
+      candidates: gathered,
+    });
+
+    showCallHint('', 'muted');
+  } catch (e) {
+    showCallHint('No se pudo contestar.', 'error');
+    addSystemMessage(e?.message || 'No se pudo contestar.');
+    await sendCallEvent(peerId, 'call:reject', { callId, fromId: meId, toId: peerId, reason: 'error' });
+    await hangupCall(false);
+  }
+}
+
+async function rejectIncomingCall() {
+  const meId = state.session?.user?.id || null;
+  const callId = state.call.id;
+  const peerId = state.call.peerId;
+  if (!meId || !callId || !peerId) {
+    cleanupCallState();
+    return;
+  }
+  await sendCallEvent(peerId, 'call:reject', { callId, fromId: meId, toId: peerId, reason: 'rejected' });
+  setIncomingBadge(peerId, false);
+  cleanupCallState();
+}
+
+function toggleMute() {
+  const stream = state.call.localStream;
+  if (!stream) return;
+  const tracks = stream.getAudioTracks();
+  if (!tracks || tracks.length === 0) return;
+  state.call.muted = !state.call.muted;
+  for (const t of tracks) t.enabled = !state.call.muted;
+  ui.callMuteBtn.textContent = state.call.muted ? 'Activar' : 'Silenciar';
 }
 
 function saveActiveChat() {
@@ -659,13 +1144,25 @@ function renderFriends() {
     if (meId) {
       const room = makeDmRoom(meId, f.id);
       const unread = isActive ? 0 : getUnread(room);
-      if (unread > 0) {
+      const isCalling = Boolean(state.incomingCallsByPeer?.[f.id]);
+      if (unread > 0 || isCalling) {
         const actions = document.createElement('div');
         actions.className = 'contact-actions';
-        const badge = document.createElement('div');
-        badge.className = 'unread-badge';
-        badge.textContent = unread > 99 ? '99+' : String(unread);
-        actions.appendChild(badge);
+
+        if (isCalling) {
+          const callBadge = document.createElement('div');
+          callBadge.className = 'call-badge';
+          callBadge.textContent = '📞';
+          actions.appendChild(callBadge);
+        }
+
+        if (unread > 0) {
+          const badge = document.createElement('div');
+          badge.className = 'unread-badge';
+          badge.textContent = unread > 99 ? '99+' : String(unread);
+          actions.appendChild(badge);
+        }
+
         row.appendChild(actions);
       }
     }
@@ -895,6 +1392,12 @@ function teardownInboxRealtime() {
   state.inboxChannel = null;
 }
 
+function teardownCallInboxRealtime() {
+  if (!state.callInboxChannel) return;
+  state.supabase.removeChannel(state.callInboxChannel);
+  state.callInboxChannel = null;
+}
+
 function setupInboxRealtime() {
   teardownInboxRealtime();
   const uid = state.session?.user?.id || null;
@@ -918,6 +1421,114 @@ function setupInboxRealtime() {
       incUnread(room);
       renderFriends();
       await playNotification();
+    })
+    .subscribe();
+}
+
+function setupCallInboxRealtime() {
+  teardownCallInboxRealtime();
+  const uid = state.session?.user?.id || null;
+  if (!uid) return;
+
+  state.callInboxChannel = state.supabase
+    .channel(`calls:${uid}`)
+    .on('broadcast', { event: 'call:invite' }, async (payload) => {
+      const p = payload?.payload || {};
+      if (!p?.callId || !p?.fromId || !p?.toId) return;
+      if (p.toId !== uid) return;
+      if (isIgnoredCall(p.callId)) return;
+      if (!state.friends.some((f) => f.id === p.fromId)) return;
+
+      if (isCallActive()) {
+        await sendCallEvent(p.fromId, 'call:reject', { callId: p.callId, fromId: uid, toId: p.fromId, reason: 'busy' });
+        return;
+      }
+
+      state.call.status = 'incoming';
+      state.call.id = p.callId;
+      state.call.peerId = p.fromId;
+      state.call.peerUsername = p.fromUsername || 'Usuario';
+      state.call.peerAvatarUrl = p.fromAvatarUrl || '';
+      state.call.direction = 'incoming';
+      state.call.pc = null;
+      state.call.localStream = null;
+      state.call.remoteStream = null;
+      state.call.muted = false;
+      state.call.pendingOffer = p.offer || null;
+      state.call.pendingRemoteCandidates = Array.isArray(p.candidates) ? p.candidates : [];
+
+      setIncomingBadge(p.fromId, true);
+      setCallOverlayVisible(true);
+      setCallUi('incoming');
+      setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Llamada entrante', `@${state.call.peerUsername}`);
+      showCallHint('Toca Aceptar para contestar.', 'muted');
+    })
+    .on('broadcast', { event: 'call:accept' }, async (payload) => {
+      const p = payload?.payload || {};
+      const meId = uid;
+      if (!p?.callId || !p?.fromId || !p?.toId) return;
+      if (p.toId !== meId) return;
+      if (state.call.status !== 'calling') return;
+      if (p.callId !== state.call.id) return;
+      if (p.fromId !== state.call.peerId) return;
+      if (!state.call.pc) return;
+
+      try {
+        setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Conectando…', 'Aplicando respuesta…');
+        await state.call.pc.setRemoteDescription(p.answer);
+        if (Array.isArray(p.candidates) && p.candidates.length > 0) {
+          state.call.pendingRemoteCandidates = [...(state.call.pendingRemoteCandidates || []), ...p.candidates];
+        }
+        await flushPendingCandidates();
+        setCallUi('in_call');
+        showCallHint('Conectando…', 'muted');
+      } catch (e) {
+        addSystemMessage(e?.message || 'No se pudo conectar la llamada.');
+        await hangupCall(true);
+      }
+    })
+    .on('broadcast', { event: 'call:reject' }, async (payload) => {
+      const p = payload?.payload || {};
+      const meId = uid;
+      if (!p?.callId || !p?.fromId || !p?.toId) return;
+      if (p.toId !== meId) return;
+      rememberIgnoredCall(p.callId);
+      if (!state.call.id || p.callId !== state.call.id) return;
+      if (!state.call.peerId || p.fromId !== state.call.peerId) return;
+      const peer = state.call.peerUsername || 'Usuario';
+      setIncomingBadge(p.fromId, false);
+      cleanupCallState();
+      addSystemMessage(`Llamada rechazada por ${peer}.`);
+      void p.reason;
+    })
+    .on('broadcast', { event: 'call:hangup' }, async (payload) => {
+      const p = payload?.payload || {};
+      const meId = uid;
+      if (!p?.callId || !p?.fromId || !p?.toId) return;
+      if (p.toId !== meId) return;
+      rememberIgnoredCall(p.callId);
+      if (!state.call.id || p.callId !== state.call.id) return;
+      if (!state.call.peerId || p.fromId !== state.call.peerId) return;
+      const peer = state.call.peerUsername || 'Usuario';
+      setIncomingBadge(p.fromId, false);
+      cleanupCallState();
+      addSystemMessage(`Llamada finalizada con ${peer}.`);
+    })
+    .on('broadcast', { event: 'call:ice' }, async (payload) => {
+      const p = payload?.payload || {};
+      const meId = uid;
+      if (!p?.callId || !p?.fromId || !p?.toId) return;
+      if (p.toId !== meId) return;
+      if (!state.call.id || p.callId !== state.call.id) return;
+      if (!state.call.peerId || p.fromId !== state.call.peerId) return;
+      if (!state.call.pc) return;
+      if (!p.candidate) return;
+      if (!state.call.pendingRemoteCandidates) state.call.pendingRemoteCandidates = [];
+      if (!state.call.pc.remoteDescription) {
+        state.call.pendingRemoteCandidates.push(p.candidate);
+        return;
+      }
+      await safeAddIceCandidate(state.call.pc, p.candidate);
     })
     .subscribe();
 }
@@ -1149,6 +1760,22 @@ function wireUi() {
     goToLogin();
   });
 
+  ui.callBtn.addEventListener('click', async () => {
+    await startOutgoingCall();
+  });
+  ui.callAcceptBtn.addEventListener('click', async () => {
+    await acceptIncomingCall();
+  });
+  ui.callRejectBtn.addEventListener('click', async () => {
+    await rejectIncomingCall();
+  });
+  ui.callHangBtn.addEventListener('click', async () => {
+    await hangupCall(true);
+  });
+  ui.callMuteBtn.addEventListener('click', () => {
+    toggleMute();
+  });
+
   ui.openSidebarBtn.addEventListener('click', openSidebar);
   ui.closeSidebarBtn.addEventListener('click', closeSidebar);
 
@@ -1205,6 +1832,7 @@ async function init() {
 
   setupSocialRealtime();
   setupInboxRealtime();
+  setupCallInboxRealtime();
 
   state.supabase.auth.onAuthStateChange((_event, session) => {
     state.session = session;
@@ -1212,11 +1840,14 @@ async function init() {
       teardownSocialRealtime();
       teardownInboxRealtime();
       teardownRealtime();
+      teardownCallInboxRealtime();
+      cleanupCallState();
       goToLogin();
       return;
     }
     setupSocialRealtime();
     setupInboxRealtime();
+    setupCallInboxRealtime();
   });
 
   try {

@@ -59,6 +59,7 @@
           </div>
           <div class="chat-header-actions">
             <a class="pill" id="profileBtn" href="/perfil.html">Perfil</a>
+            <button class="icon-btn" id="callBtn" type="button" aria-label="Llamar">📞</button>
             <button class="pill" id="signOutBtn" type="button">Salir</button>
           </div>
         </div>
@@ -75,6 +76,28 @@
       </main>
     </section>
   </div>
+
+  <div class="call-overlay hidden" id="callOverlay" aria-live="polite">
+    <div class="call-card">
+      <div class="call-top">
+        <div class="avatar big" id="callAvatar">?</div>
+        <div class="call-meta">
+          <div class="call-title" id="callTitle">Llamada</div>
+          <div class="call-sub" id="callSub">Conectando…</div>
+        </div>
+      </div>
+
+      <div class="call-actions">
+        <button class="btn primary hidden" id="callAcceptBtn" type="button">Aceptar</button>
+        <button class="btn hidden" id="callRejectBtn" type="button">Rechazar</button>
+        <button class="btn primary hidden" id="callHangBtn" type="button">Colgar</button>
+        <button class="btn hidden" id="callMuteBtn" type="button">Silenciar</button>
+      </div>
+      <p class="hint" id="callHint"></p>
+    </div>
+  </div>
+
+  <audio id="remoteAudio" autoplay playsinline></audio>
 
   <script type="module" src="/mensajes.js"></script>
 </body>
