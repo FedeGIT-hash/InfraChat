@@ -166,9 +166,13 @@ async function resizeToCover(file, w = 1200, h = 420) {
 }
 
 async function uploadImage(path, blob) {
+  const fileName = String(path || '').split('/').pop() || 'image.jpg';
+  const file =
+    blob instanceof File ? blob : new File([blob], fileName, { type: 'image/jpeg', lastModified: Date.now() });
+
   const { error } = await state.supabase.storage
     .from('avatars')
-    .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+    .upload(path, file, { upsert: true, contentType: 'image/jpeg', cacheControl: '3600' });
   if (error) throw error;
 
   const { data } = state.supabase.storage.from('avatars').getPublicUrl(path);
@@ -195,8 +199,9 @@ async function uploadAvatar() {
     state.profile.avatar_url = url;
     setAvatar(url, state.profile.username);
     setHint('Foto actualizada.', 'ok');
-  } catch {
-    setHint('No se pudo subir la foto. Revisa bucket/policies.', 'error');
+  } catch (err) {
+    const detail = err?.message ? ` (${err.message})` : '';
+    setHint(`No se pudo subir la foto. Revisa bucket/policies.${detail}`, 'error');
   } finally {
     ui.uploadAvatarBtn.disabled = false;
   }
@@ -222,8 +227,9 @@ async function uploadCover() {
     state.profile.cover_url = url;
     setCover(url);
     setHint('Portada actualizada.', 'ok');
-  } catch {
-    setHint('No se pudo subir la portada. Revisa bucket/policies.', 'error');
+  } catch (err) {
+    const detail = err?.message ? ` (${err.message})` : '';
+    setHint(`No se pudo subir la portada. Revisa bucket/policies.${detail}`, 'error');
   } finally {
     ui.uploadCoverBtn.disabled = false;
   }
@@ -282,4 +288,3 @@ async function init() {
 }
 
 init();
-
