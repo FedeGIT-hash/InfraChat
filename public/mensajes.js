@@ -37,6 +37,14 @@ const fallbackConfig = {
   enableSignup: true,
 };
 
+const notifier = {
+  audio: null,
+  enabled: true,
+  unlocked: false,
+  warnedMissing: false,
+  lastPlayedAt: 0,
+};
+
 function goToLogin() {
   window.location.assign('/');
 }
@@ -105,6 +113,50 @@ function addSystemMessage(text) {
   bubble.textContent = text;
   msg.appendChild(bubble);
   ui.messages.appendChild(msg);
+}
+
+function initNotifier() {
+  try {
+    notifier.audio = new Audio('/noti.mp3');
+    notifier.audio.preload = 'auto';
+  } catch {
+    notifier.audio = null;
+  }
+
+  const unlock = async () => {
+    if (!notifier.audio || notifier.unlocked) return;
+    try {
+      await notifier.audio.play();
+      notifier.audio.pause();
+      notifier.audio.currentTime = 0;
+      notifier.unlocked = true;
+    } catch {
+      notifier.unlocked = false;
+    }
+  };
+
+  document.addEventListener('pointerdown', unlock, { once: true });
+  document.addEventListener('keydown', unlock, { once: true });
+}
+
+async function playNotification() {
+  if (!notifier.enabled) return;
+  if (!notifier.audio) return;
+  if (!notifier.unlocked) return;
+
+  const now = Date.now();
+  if (now - notifier.lastPlayedAt < 700) return;
+  notifier.lastPlayedAt = now;
+
+  try {
+    notifier.audio.currentTime = 0;
+    await notifier.audio.play();
+  } catch {
+    if (!notifier.warnedMissing) {
+      notifier.warnedMissing = true;
+      addSystemMessage('Toca la pantalla para activar sonido de notificaciones.');
+    }
+  }
 }
 
 function renderMessage(row) {
@@ -332,7 +384,12 @@ function setupRealtime() {
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'mensajes', filter: `room=eq.${state.room}` },
-      (payload) => renderMessage(payload.new),
+      async (payload) => {
+        const row = payload.new;
+        const isMine = state.session?.user?.id && row?.user_id === state.session.user.id;
+        renderMessage(row);
+        if (!isMine) await playNotification();
+      },
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') ui.roomStatus.textContent = 'En tiempo real';
@@ -417,6 +474,7 @@ function wireUi() {
 }
 
 async function init() {
+  initNotifier();
   wireUi();
 
   let res = null;

@@ -24,6 +24,9 @@ function sendConfig(_req, res) {
 
 app.get('/config', sendConfig);
 app.get('/api/config', sendConfig);
+app.get('/noti.mp3', (_req, res) => {
+  res.sendFile(path.resolve(__dirname, 'noti.mp3'));
+});
 
 app.use(express.static(path.resolve(__dirname, 'public')));
 
