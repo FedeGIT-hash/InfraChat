@@ -42,6 +42,31 @@ body {
   display: none !important;
 }
 
+.verified-badge {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-left: 8px;
+  background: radial-gradient(circle at 30% 30%, rgba(120, 220, 255, 1), rgba(40, 140, 255, 1));
+  box-shadow: 0 0 0 2px rgba(24, 3, 8, 0.7), 0 0 14px rgba(60, 170, 255, 0.35);
+  position: relative;
+  vertical-align: -3px;
+}
+
+.verified-badge::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 9px;
+  height: 5px;
+  border-left: 2px solid rgba(255, 255, 255, 0.95);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.95);
+  transform: rotate(-45deg);
+  top: 5px;
+}
+
 .viewport {
   min-height: 100dvh;
 }

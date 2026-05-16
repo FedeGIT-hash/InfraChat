@@ -173,6 +173,20 @@ function setChatSubline(text) {
   requestAnimationFrame(() => ui.chatSubline.classList.add('show'));
 }
 
+function setNameWithBadge(target, name, verified) {
+  if (!target) return;
+  target.textContent = '';
+  const text = document.createElement('span');
+  text.textContent = name || '';
+  target.appendChild(text);
+  if (verified) {
+    const badge = document.createElement('span');
+    badge.className = 'verified-badge';
+    badge.setAttribute('aria-label', 'Verificado');
+    target.appendChild(badge);
+  }
+}
+
 function setChatEnabled(enabled) {
   ui.msgInput.disabled = !enabled;
   ui.sendBtn.disabled = !enabled;
@@ -430,7 +444,7 @@ function renderSearchResult() {
 
   const name = document.createElement('div');
   name.className = 'name';
-  name.textContent = u.username;
+  setNameWithBadge(name, u.username, Boolean(u.verified));
 
   const preview = document.createElement('div');
   preview.className = 'preview';
@@ -493,7 +507,7 @@ function renderRequests() {
 
     const name = document.createElement('div');
     name.className = 'name';
-    name.textContent = r.direction === 'in' ? `${r.username}` : `${r.username}`;
+    setNameWithBadge(name, r.username, Boolean(r.verified));
 
     const preview = document.createElement('div');
     preview.className = 'preview';
@@ -576,7 +590,7 @@ function renderFriends() {
 
     const name = document.createElement('div');
     name.className = 'name';
-    name.textContent = f.username;
+    setNameWithBadge(name, f.username, Boolean(f.verified));
 
     const preview = document.createElement('div');
     preview.className = 'preview';
@@ -605,10 +619,11 @@ async function setActiveChat(friend) {
     peerUsername: friend.username || 'Usuario',
     peerAvatarUrl: friend.avatar_url || '',
     peerBio: friend.bio || '',
+    peerVerified: Boolean(friend.verified),
   };
 
   state.room = makeDmRoom(meId, friend.id);
-  ui.roomName.textContent = state.activeChat.peerUsername;
+  setNameWithBadge(ui.roomName, state.activeChat.peerUsername, state.activeChat.peerVerified);
   ui.roomStatus.textContent = 'Conectado';
   setChatSubline(state.activeChat.peerBio);
   setAvatar(ui.roomAvatar, state.activeChat.peerAvatarUrl, state.activeChat.peerUsername);
@@ -735,13 +750,13 @@ async function loadProfile() {
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const { data, error } = await state.supabase
       .from('usuarios')
-      .select('id, username, avatar_url, bio')
+      .select('id, username, avatar_url, bio, verified, is_admin')
       .eq('id', userId)
       .maybeSingle();
 
     if (!error && data) {
       state.profile = data;
-      ui.meLine.textContent = `@${data.username}`;
+      ui.meLine.textContent = `@${data.username}${data.verified ? ' ✓' : ''}`;
       return;
     }
 

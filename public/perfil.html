@@ -35,7 +35,10 @@
             <div class="profile-card-head">
               <div class="avatar big" id="avatarBox">?</div>
               <div class="profile-meta">
-                <div class="profile-username" id="usernameLine">Cargando…</div>
+                <div class="profile-username">
+                  <span id="usernameLine">Cargando…</span>
+                  <span class="verified-badge hidden" id="verifiedBadge" aria-label="Verificado"></span>
+                </div>
                 <div class="profile-sub" id="profileSub">Actualiza tu foto, portada y descripción</div>
               </div>
             </div>
@@ -55,6 +58,35 @@
               <p class="hint" id="profileHint"></p>
             </div>
           </div>
+
+          <div class="profile-card hidden" id="adminCard">
+            <div class="profile-card-head">
+              <div class="profile-meta">
+                <div class="profile-username">Panel admin</div>
+                <div class="profile-sub">Crear usuarios sin verificación de correo</div>
+              </div>
+            </div>
+
+            <div class="profile-grid">
+              <form class="form" id="adminCreateUserForm">
+                <label class="field">
+                  <span>Email</span>
+                  <input id="adminEmail" type="email" autocomplete="email" required />
+                </label>
+                <label class="field">
+                  <span>Username</span>
+                  <input id="adminUsername" type="text" autocomplete="username" required />
+                </label>
+                <label class="field">
+                  <span>Contraseña (opcional)</span>
+                  <input id="adminPassword" type="text" autocomplete="off" placeholder="Si lo dejas vacío se genera una" />
+                </label>
+
+                <button class="btn primary" id="adminCreateBtn" type="submit">Crear usuario</button>
+                <p class="hint" id="adminHint"></p>
+              </form>
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -62,4 +94,3 @@
     <script type="module" src="/perfil.js"></script>
   </body>
 </html>
-

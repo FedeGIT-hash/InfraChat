@@ -11,9 +11,18 @@ const ui = {
   avatarInput: el('avatarInput'),
   uploadAvatarBtn: el('uploadAvatarBtn'),
   usernameLine: el('usernameLine'),
+  verifiedBadge: el('verifiedBadge'),
   bioInput: el('bioInput'),
   saveProfileBtn: el('saveProfileBtn'),
   profileHint: el('profileHint'),
+
+  adminCard: el('adminCard'),
+  adminCreateUserForm: el('adminCreateUserForm'),
+  adminEmail: el('adminEmail'),
+  adminUsername: el('adminUsername'),
+  adminPassword: el('adminPassword'),
+  adminCreateBtn: el('adminCreateBtn'),
+  adminHint: el('adminHint'),
 };
 
 const state = {
@@ -105,7 +114,7 @@ async function loadProfile() {
 
   const { data, error } = await state.supabase
     .from('usuarios')
-    .select('id, username, avatar_url, cover_url, bio')
+    .select('id, username, avatar_url, cover_url, bio, verified, is_admin')
     .eq('id', userId)
     .maybeSingle();
 
@@ -113,9 +122,12 @@ async function loadProfile() {
   state.profile = data;
 
   ui.usernameLine.textContent = `@${data.username}`;
+  ui.verifiedBadge.classList.toggle('hidden', !data.verified);
   ui.bioInput.value = data.bio || '';
   setAvatar(data.avatar_url, data.username);
   setCover(data.cover_url);
+
+  ui.adminCard.classList.toggle('hidden', !data.is_admin);
 }
 
 async function canvasToJpegBlob(canvas, quality = 0.86) {
@@ -254,6 +266,38 @@ async function saveProfile() {
   }
 }
 
+function setAdminHint(text, tone = 'muted') {
+  ui.adminHint.textContent = text || '';
+  if (!text) {
+    ui.adminHint.style.color = '';
+    return;
+  }
+  if (tone === 'error') ui.adminHint.style.color = 'rgba(255, 180, 180, 0.95)';
+  if (tone === 'ok') ui.adminHint.style.color = 'rgba(170, 255, 200, 0.95)';
+  if (tone === 'muted') ui.adminHint.style.color = '';
+}
+
+async function adminCreateUser(email, username, password) {
+  const token = state.session?.access_token || '';
+  if (!token) throw new Error('Sesión inválida');
+
+  const res = await fetch('/api/admin/create-user', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ email, username, password: password || null }),
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = data?.error || `Error ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
 function wireUi() {
   ui.signOutBtn.addEventListener('click', async () => {
     await state.supabase.auth.signOut();
@@ -263,6 +307,29 @@ function wireUi() {
   ui.uploadAvatarBtn.addEventListener('click', uploadAvatar);
   ui.uploadCoverBtn.addEventListener('click', uploadCover);
   ui.saveProfileBtn.addEventListener('click', saveProfile);
+
+  ui.adminCreateUserForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    setAdminHint('');
+    ui.adminCreateBtn.disabled = true;
+
+    const email = String(ui.adminEmail.value || '').trim();
+    const username = String(ui.adminUsername.value || '').trim();
+    const password = String(ui.adminPassword.value || '').trim();
+
+    try {
+      const out = await adminCreateUser(email, username, password);
+      ui.adminEmail.value = '';
+      ui.adminUsername.value = '';
+      ui.adminPassword.value = '';
+      const shownPass = out.password ? ` Contraseña: ${out.password}` : '';
+      setAdminHint(`Creado: ${out.email}.${shownPass}`, 'ok');
+    } catch (err) {
+      setAdminHint(err?.message || 'No se pudo crear.', 'error');
+    } finally {
+      ui.adminCreateBtn.disabled = false;
+    }
+  });
 }
 
 async function init() {
