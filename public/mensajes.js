@@ -38,11 +38,13 @@ const state = {
   requests: [],
   searchUser: null,
   realtimeChannel: null,
+  inboxChannel: null,
   socialChannel: null,
   socialRefreshTimer: null,
   seenMessageIds: new Set(),
   activeChat: { type: 'none', peerId: null, peerUsername: null, peerAvatarUrl: null, peerBio: null },
   typingUsers: {},
+  unreadByRoom: {},
 };
 
 const fallbackConfig = {
@@ -92,6 +94,56 @@ function makeDmRoom(a, b) {
   const id2 = String(b || '');
   if (!id1 || !id2) return 'general';
   return id1 < id2 ? `dm_${id1}_${id2}` : `dm_${id2}_${id1}`;
+}
+
+function loadUnread() {
+  try {
+    const raw = localStorage.getItem('infrachat_unread');
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+function saveUnread() {
+  try {
+    localStorage.setItem('infrachat_unread', JSON.stringify(state.unreadByRoom || {}));
+  } catch {
+    return;
+  }
+}
+
+function incUnread(room) {
+  if (!room) return;
+  if (!state.unreadByRoom) state.unreadByRoom = {};
+  state.unreadByRoom[room] = (state.unreadByRoom[room] || 0) + 1;
+  saveUnread();
+}
+
+function clearUnread(room) {
+  if (!room) return;
+  if (!state.unreadByRoom) state.unreadByRoom = {};
+  if (!state.unreadByRoom[room]) return;
+  delete state.unreadByRoom[room];
+  saveUnread();
+}
+
+function getUnread(room) {
+  return Number(state.unreadByRoom?.[room] || 0) || 0;
+}
+
+function parseDmOtherId(room, myId) {
+  const r = String(room || '');
+  if (!r.startsWith('dm_')) return null;
+  const a = r.split('_')[1] || '';
+  const b = r.split('_')[2] || '';
+  if (!a || !b) return null;
+  if (a === myId) return b;
+  if (b === myId) return a;
+  return null;
 }
 
 function saveActiveChat() {
@@ -576,6 +628,8 @@ function renderFriends() {
 
   container.innerHTML = '';
 
+  const meId = state.session?.user?.id || null;
+
   for (const f of state.friends) {
     const row = document.createElement('div');
     const isActive = state.activeChat.type === 'dm' && state.activeChat.peerId === f.id;
@@ -601,6 +655,21 @@ function renderFriends() {
 
     row.appendChild(avatar);
     row.appendChild(info);
+
+    if (meId) {
+      const room = makeDmRoom(meId, f.id);
+      const unread = isActive ? 0 : getUnread(room);
+      if (unread > 0) {
+        const actions = document.createElement('div');
+        actions.className = 'contact-actions';
+        const badge = document.createElement('div');
+        badge.className = 'unread-badge';
+        badge.textContent = unread > 99 ? '99+' : String(unread);
+        actions.appendChild(badge);
+        row.appendChild(actions);
+      }
+    }
+
     row.addEventListener('click', async () => {
       await setActiveChat(f);
     });
@@ -623,6 +692,7 @@ async function setActiveChat(friend) {
   };
 
   state.room = makeDmRoom(meId, friend.id);
+  clearUnread(state.room);
   setNameWithBadge(ui.roomName, state.activeChat.peerUsername, state.activeChat.peerVerified);
   ui.roomStatus.textContent = 'Conectado';
   setChatSubline(state.activeChat.peerBio);
@@ -779,6 +849,9 @@ async function loadMessages() {
     return;
   }
 
+  clearUnread(state.room);
+  renderFriends();
+
   const { data, error } = await state.supabase
     .from('mensajes')
     .select('id, room, user_id, username, contenido, created_at')
@@ -814,6 +887,39 @@ function teardownSocialRealtime() {
   state.socialChannel = null;
   if (state.socialRefreshTimer) clearTimeout(state.socialRefreshTimer);
   state.socialRefreshTimer = null;
+}
+
+function teardownInboxRealtime() {
+  if (!state.inboxChannel) return;
+  state.supabase.removeChannel(state.inboxChannel);
+  state.inboxChannel = null;
+}
+
+function setupInboxRealtime() {
+  teardownInboxRealtime();
+  const uid = state.session?.user?.id || null;
+  if (!uid) return;
+
+  state.inboxChannel = state.supabase
+    .channel(`inbox:${uid}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes' }, async (payload) => {
+      const row = payload?.new;
+      if (!row) return;
+      if (row.user_id === uid) return;
+      const room = String(row.room || '');
+      if (!room.startsWith('dm_')) return;
+
+      if (room === state.room) return;
+
+      const otherId = parseDmOtherId(room, uid);
+      if (!otherId) return;
+      if (!state.friends.some((f) => f.id === otherId)) return;
+
+      incUnread(room);
+      renderFriends();
+      await playNotification();
+    })
+    .subscribe();
 }
 
 function scheduleSocialRefresh() {
@@ -1095,17 +1201,22 @@ async function init() {
     return;
   }
 
+  state.unreadByRoom = loadUnread();
+
   setupSocialRealtime();
+  setupInboxRealtime();
 
   state.supabase.auth.onAuthStateChange((_event, session) => {
     state.session = session;
     if (!session) {
       teardownSocialRealtime();
+      teardownInboxRealtime();
       teardownRealtime();
       goToLogin();
       return;
     }
     setupSocialRealtime();
+    setupInboxRealtime();
   });
 
   try {
