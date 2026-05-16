@@ -18,64 +18,83 @@
   <div class="viewport">
     <section class="auth" aria-label="Autenticación">
       <div class="login-wrap">
-        <div class="auth-card">
-          <header class="auth-brand">
-            <div class="logo">I</div>
-            <div class="logo-text">
-              <h1>InfraChat</h1>
-              <p>MESSAGING · SYSTEMS</p>
+        <div class="auth-shell">
+          <div class="auth-hero" aria-hidden="true">
+            <div class="auth-hero-top">
+              <div class="logo big">I</div>
+              <div class="auth-hero-brand">
+                <div class="auth-hero-title">InfraChat</div>
+                <div class="auth-hero-sub">Messaging · Systems</div>
+              </div>
             </div>
-          </header>
 
-          <div class="tabs" role="tablist" aria-label="Auth Tabs">
-            <button class="tab active" id="tab-login" type="button" role="tab" aria-selected="true">Login</button>
-            <button class="tab" id="tab-registro" type="button" role="tab" aria-selected="false">Registro</button>
+            <div class="auth-hero-body">
+              <div class="auth-hero-headline">Tu chat, tu espacio.</div>
+              <div class="auth-hero-copy">Mensajes en tiempo real, notificaciones y DM por amistad.</div>
+
+              <div class="auth-badges">
+                <div class="auth-badge">Realtime</div>
+                <div class="auth-badge">Supabase</div>
+                <div class="auth-badge">Responsive</div>
+              </div>
+            </div>
           </div>
 
-          <div class="tab-panels">
-            <div class="panel active" id="panel-login" role="tabpanel" aria-labelledby="tab-login">
-              <form class="form" id="loginForm">
-                <label class="field">
-                  <span>Email</span>
-                  <input id="loginEmail" type="email" autocomplete="email" required />
-                </label>
-                <label class="field">
-                  <span>Contraseña</span>
-                  <input id="loginPassword" type="password" autocomplete="current-password" required />
-                </label>
+          <div class="auth-card">
+            <header class="auth-brand">
+              <div class="logo">I</div>
+              <div class="logo-text">
+                <h1>InfraChat</h1>
+                <p>MESSAGING · SYSTEMS</p>
+              </div>
+            </header>
 
-                <button class="btn primary" id="loginBtn" type="submit">Entrar</button>
-                <p class="hint" id="authHint"></p>
-              </form>
+            <div class="tabs" role="tablist" aria-label="Auth Tabs">
+              <button class="tab active" id="tab-login" type="button" role="tab" aria-selected="true">Login</button>
+              <button class="tab" id="tab-registro" type="button" role="tab" aria-selected="false">Registro</button>
             </div>
 
-            <div class="panel" id="panel-registro" role="tabpanel" aria-labelledby="tab-registro">
-              <div class="info-box">
-                <p class="muted">
-                  Crea tu cuenta con email y contraseña.
-                </p>
-                <p class="muted">
-                  El perfil se guarda en <strong>public.usuarios</strong> automáticamente al registrarte.
-                </p>
+            <div class="tab-panels">
+              <div class="panel active" id="panel-login" role="tabpanel" aria-labelledby="tab-login">
+                <form class="form" id="loginForm">
+                  <label class="field">
+                    <span>Email</span>
+                    <input id="loginEmail" type="email" autocomplete="email" required />
+                  </label>
+                  <label class="field">
+                    <span>Contraseña</span>
+                    <input id="loginPassword" type="password" autocomplete="current-password" required />
+                  </label>
+
+                  <button class="btn primary" id="loginBtn" type="submit">Entrar</button>
+                  <p class="hint" id="authHint"></p>
+                </form>
               </div>
 
-              <form class="form" id="signupForm">
-                <label class="field">
-                  <span>Email</span>
-                  <input id="signupEmail" type="email" autocomplete="email" required />
-                </label>
-                <label class="field">
-                  <span>Contraseña</span>
-                  <input id="signupPassword" type="password" autocomplete="new-password" required />
-                </label>
-                <label class="field">
-                  <span>Username</span>
-                  <input id="signupUsername" type="text" autocomplete="username" required />
-                </label>
+              <div class="panel" id="panel-registro" role="tabpanel" aria-labelledby="tab-registro">
+                <div class="info-box">
+                  <p class="muted">Crea tu cuenta con email y contraseña.</p>
+                  <p class="muted">El perfil se guarda en <strong>public.usuarios</strong> automáticamente al registrarte.</p>
+                </div>
 
-                <button class="btn" id="signupBtn" type="submit">Crear cuenta</button>
-                <p class="hint" id="signupHint"></p>
-              </form>
+                <form class="form" id="signupForm">
+                  <label class="field">
+                    <span>Email</span>
+                    <input id="signupEmail" type="email" autocomplete="email" required />
+                  </label>
+                  <label class="field">
+                    <span>Contraseña</span>
+                    <input id="signupPassword" type="password" autocomplete="new-password" required />
+                  </label>
+                  <label class="field">
+                    <span>Username</span>
+                    <input id="signupUsername" type="text" autocomplete="username" required />
+                  </label>
+
+                  <button class="btn" id="signupBtn" type="submit">Crear cuenta</button>
+                  <p class="hint" id="signupHint"></p>
+                </form>
+              </div>
             </div>
           </div>
         </div>
@@ -87,4 +106,3 @@
 </body>
 
 </html>
-
