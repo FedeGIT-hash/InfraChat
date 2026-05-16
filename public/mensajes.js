@@ -7,6 +7,7 @@ const ui = {
   roomName: el('roomName'),
   roomStatus: el('roomStatus'),
   messages: el('messages'),
+  typingIndicator: el('typingIndicator'),
   sendForm: el('sendForm'),
   msgInput: el('msgInput'),
   sendBtn: el('sendBtn'),
@@ -43,6 +44,11 @@ const notifier = {
   unlocked: false,
   warnedMissing: false,
   lastPlayedAt: 0,
+  audioCtx: null,
+  gain: null,
+  buffer: null,
+  loading: false,
+  ready: false,
 };
 
 function goToLogin() {
@@ -116,29 +122,20 @@ function addSystemMessage(text) {
 }
 
 function initNotifier() {
-  try {
-    notifier.audio = new Audio('/api/noti');
-    notifier.audio.preload = 'auto';
-    notifier.audio.volume = 0.9;
-    notifier.audio.addEventListener('error', () => {
-      if (notifier.warnedMissing) return;
-      notifier.warnedMissing = true;
-      addSystemMessage('No se pudo cargar el audio de notificación (noti.mp3).');
-    });
-  } catch {
-    notifier.audio = null;
-  }
-
   const unlock = async () => {
-    if (!notifier.audio || notifier.unlocked) return;
+    if (notifier.unlocked) return;
     try {
-      const prevVolume = notifier.audio.volume;
-      notifier.audio.volume = 0;
-      await notifier.audio.play();
-      notifier.audio.pause();
-      notifier.audio.currentTime = 0;
-      notifier.audio.volume = prevVolume;
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      if (!notifier.audioCtx) {
+        notifier.audioCtx = new Ctx();
+        notifier.gain = notifier.audioCtx.createGain();
+        notifier.gain.gain.value = 0.9;
+        notifier.gain.connect(notifier.audioCtx.destination);
+      }
+      if (notifier.audioCtx.state !== 'running') await notifier.audioCtx.resume();
       notifier.unlocked = true;
+      void preloadNotificationSound();
     } catch {
       notifier.unlocked = false;
     }
@@ -150,22 +147,59 @@ function initNotifier() {
 
 async function playNotification() {
   if (!notifier.enabled) return;
-  if (!notifier.audio) return;
   if (!notifier.unlocked) return;
+  if (!notifier.audioCtx || !notifier.gain) return;
+
+  if (!notifier.ready) await preloadNotificationSound();
+  if (!notifier.buffer) return;
 
   const now = Date.now();
   if (now - notifier.lastPlayedAt < 700) return;
   notifier.lastPlayedAt = now;
 
   try {
-    notifier.audio.currentTime = 0;
-    await notifier.audio.play();
+    const source = notifier.audioCtx.createBufferSource();
+    source.buffer = notifier.buffer;
+    source.connect(notifier.gain);
+    source.start(0);
   } catch {
     if (!notifier.warnedMissing) {
       notifier.warnedMissing = true;
       addSystemMessage('Toca la pantalla para activar sonido de notificaciones.');
     }
   }
+}
+
+async function preloadNotificationSound() {
+  if (notifier.loading || notifier.ready) return;
+  if (!notifier.audioCtx) return;
+  notifier.loading = true;
+
+  const urls = ['/api/noti', '/noti.mp3'];
+  let lastErr = null;
+
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { cache: 'force-cache' });
+      if (!res.ok) throw new Error(String(res.status));
+      const buf = await res.arrayBuffer();
+      notifier.buffer = await notifier.audioCtx.decodeAudioData(buf.slice(0));
+      notifier.ready = true;
+      notifier.loading = false;
+      return;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+
+  notifier.loading = false;
+  notifier.ready = false;
+  notifier.buffer = null;
+  if (!notifier.warnedMissing) {
+    notifier.warnedMissing = true;
+    addSystemMessage('No se pudo cargar el audio de notificación (noti.mp3).');
+  }
+  void lastErr;
 }
 
 function renderMessage(row) {
@@ -382,6 +416,8 @@ function teardownRealtime() {
   if (!state.realtimeChannel) return;
   state.supabase.removeChannel(state.realtimeChannel);
   state.realtimeChannel = null;
+  state.typingUsers = {};
+  renderTypingIndicator();
 }
 
 function setupRealtime() {
@@ -400,12 +436,98 @@ function setupRealtime() {
         if (!isMine) await playNotification();
       },
     )
+    .on('broadcast', { event: 'typing' }, (payload) => {
+      const meId = state.session?.user?.id || null;
+      const p = payload?.payload || {};
+      if (!p || !p.userId || p.userId === meId) return;
+      if (p.room !== state.room) return;
+
+      if (!state.typingUsers) state.typingUsers = {};
+      if (p.isTyping) {
+        state.typingUsers[p.userId] = { username: p.username || 'Usuario', lastAt: Date.now() };
+      } else if (state.typingUsers[p.userId]) {
+        delete state.typingUsers[p.userId];
+      }
+      renderTypingIndicator();
+    })
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') ui.roomStatus.textContent = 'En tiempo real';
       if (status === 'CLOSED') ui.roomStatus.textContent = 'Desconectado';
       if (status === 'CHANNEL_ERROR') ui.roomStatus.textContent = 'Error realtime';
     });
 }
+
+function renderTypingIndicator() {
+  const typing = state.typingUsers || {};
+  const now = Date.now();
+  for (const [k, v] of Object.entries(typing)) {
+    if (!v?.lastAt || now - v.lastAt > 3500) delete typing[k];
+  }
+
+  const names = Object.values(typing)
+    .map((x) => x.username)
+    .filter(Boolean);
+
+  if (names.length === 0) {
+    ui.typingIndicator.classList.add('hidden');
+    ui.typingIndicator.textContent = '';
+    return;
+  }
+
+  const label = names.length === 1 ? `${names[0]} está escribiendo…` : `${names.length} están escribiendo…`;
+  ui.typingIndicator.textContent = label;
+  ui.typingIndicator.classList.remove('hidden');
+}
+
+function broadcastTyping(isTyping) {
+  const meId = state.session?.user?.id || null;
+  if (!meId || !state.realtimeChannel) return;
+  state.realtimeChannel.send({
+    type: 'broadcast',
+    event: 'typing',
+    payload: {
+      room: state.room,
+      userId: meId,
+      username: state.profile?.username || 'Usuario',
+      isTyping: Boolean(isTyping),
+    },
+  });
+}
+
+function createTypingController() {
+  let lastSent = null;
+  let offTimer = null;
+
+  return {
+    onInput() {
+      const hasText = String(ui.msgInput.value || '').trim().length > 0;
+      const should = hasText;
+
+      if (should !== lastSent) {
+        lastSent = should;
+        broadcastTyping(should);
+      }
+
+      if (offTimer) clearTimeout(offTimer);
+      offTimer = setTimeout(() => {
+        if (lastSent) {
+          lastSent = false;
+          broadcastTyping(false);
+        }
+      }, 1200);
+    },
+    forceOff() {
+      if (offTimer) clearTimeout(offTimer);
+      offTimer = null;
+      if (lastSent) {
+        lastSent = false;
+        broadcastTyping(false);
+      }
+    },
+  };
+}
+
+const typingCtl = createTypingController();
 
 async function sendMessage(text) {
   const clean = String(text || '').trim();
@@ -445,7 +567,10 @@ function closeSidebar() {
 function wireUi() {
   ui.userSearch.addEventListener('input', () => renderUsers(state.users));
 
-  ui.msgInput.addEventListener('input', autosizeTextarea);
+  ui.msgInput.addEventListener('input', () => {
+    autosizeTextarea();
+    typingCtl.onInput();
+  });
   ui.msgInput.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter') return;
     if (e.shiftKey) return;
@@ -459,6 +584,7 @@ function wireUi() {
       await sendMessage(ui.msgInput.value);
       ui.msgInput.value = '';
       autosizeTextarea();
+      typingCtl.forceOff();
     } catch (err) {
       addSystemMessage(err?.message || 'No se pudo enviar.');
     }
