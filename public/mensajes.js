@@ -360,6 +360,14 @@ async function waitForIceGatheringComplete(pc, timeoutMs = 3200) {
 }
 
 async function getLocalAudioStream() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error('Tu navegador no soporta llamadas (getUserMedia).');
+  }
+  const isLocalhost =
+    location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname === '[::1]';
+  if (!window.isSecureContext && !isLocalhost) {
+    throw new Error('Para usar el micrófono necesitas abrir la web en HTTPS (o en http://localhost).');
+  }
   return navigator.mediaDevices.getUserMedia({
     audio: {
       echoCancellation: true,
@@ -368,6 +376,28 @@ async function getLocalAudioStream() {
     },
     video: false,
   });
+}
+
+function describeMicError(err) {
+  const name = String(err?.name || '').trim();
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+    return 'Micrófono bloqueado. Actívalo en permisos del sitio (candado en la barra) y recarga.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return 'No se encontró micrófono en el dispositivo.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'El micrófono está en uso por otra app. Ciérrala e intenta de nuevo.';
+  }
+  if (name === 'SecurityError') {
+    return 'El navegador bloqueó el micrófono por no ser HTTPS (o por políticas del navegador).';
+  }
+  if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+    return 'No se pudo iniciar el micrófono con la configuración actual.';
+  }
+  const msg = String(err?.message || '').trim();
+  if (msg) return msg;
+  return 'No se pudo usar el micrófono.';
 }
 
 async function primeRemoteAudio() {
@@ -489,8 +519,9 @@ async function startOutgoingCall() {
   try {
     localStream = await getLocalAudioStream();
   } catch (e) {
-    showCallHint('No se pudo usar el micrófono.', 'error');
-    addSystemMessage(e?.message || 'No se pudo usar el micrófono.');
+    const m = describeMicError(e);
+    showCallHint(m, 'error');
+    addSystemMessage(m);
     await hangupCall(false);
     return;
   }
@@ -561,8 +592,9 @@ async function acceptIncomingCall() {
   try {
     localStream = await getLocalAudioStream();
   } catch (e) {
-    showCallHint('No se pudo usar el micrófono.', 'error');
-    addSystemMessage(e?.message || 'No se pudo usar el micrófono.');
+    const m = describeMicError(e);
+    showCallHint(m, 'error');
+    addSystemMessage(m);
     await sendCallEvent(peerId, 'call:reject', { callId, fromId: meId, toId: peerId, reason: 'mic_denied' });
     await hangupCall(false);
     return;
