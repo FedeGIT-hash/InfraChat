@@ -117,8 +117,14 @@ function addSystemMessage(text) {
 
 function initNotifier() {
   try {
-    notifier.audio = new Audio('/noti.mp3');
+    notifier.audio = new Audio('/api/noti');
     notifier.audio.preload = 'auto';
+    notifier.audio.volume = 0.9;
+    notifier.audio.addEventListener('error', () => {
+      if (notifier.warnedMissing) return;
+      notifier.warnedMissing = true;
+      addSystemMessage('No se pudo cargar el audio de notificación (noti.mp3).');
+    });
   } catch {
     notifier.audio = null;
   }
@@ -126,9 +132,12 @@ function initNotifier() {
   const unlock = async () => {
     if (!notifier.audio || notifier.unlocked) return;
     try {
+      const prevVolume = notifier.audio.volume;
+      notifier.audio.volume = 0;
       await notifier.audio.play();
       notifier.audio.pause();
       notifier.audio.currentTime = 0;
+      notifier.audio.volume = prevVolume;
       notifier.unlocked = true;
     } catch {
       notifier.unlocked = false;
