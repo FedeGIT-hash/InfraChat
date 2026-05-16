@@ -4,8 +4,10 @@ const el = (id) => document.getElementById(id);
 
 const ui = {
   meLine: el('meLine'),
+  roomAvatar: el('roomAvatar'),
   roomName: el('roomName'),
   roomStatus: el('roomStatus'),
+  chatSubline: el('chatSubline'),
   messages: el('messages'),
   typingIndicator: el('typingIndicator'),
   sendForm: el('sendForm'),
@@ -13,8 +15,23 @@ const ui = {
   sendBtn: el('sendBtn'),
   signOutBtn: el('signOutBtn'),
 
-  usersList: el('usersList'),
   userSearch: el('userSearch'),
+  searchUserBtn: el('searchUserBtn'),
+  searchResult: el('searchResult'),
+  requestsList: el('requestsList'),
+  friendsList: el('friendsList'),
+
+  profileBtn: el('profileBtn'),
+  profileModal: el('profileModal'),
+  profileBackdrop: el('profileBackdrop'),
+  closeProfileBtn: el('closeProfileBtn'),
+  profileAvatar: el('profileAvatar'),
+  avatarInput: el('avatarInput'),
+  uploadAvatarBtn: el('uploadAvatarBtn'),
+  bioInput: el('bioInput'),
+  saveProfileBtn: el('saveProfileBtn'),
+  profileHint: el('profileHint'),
+
   openSidebarBtn: el('openSidebarBtn'),
   closeSidebarBtn: el('closeSidebarBtn'),
   sidebar: el('sidebar'),
@@ -23,13 +40,16 @@ const ui = {
 const state = {
   config: null,
   supabase: null,
-  room: 'general',
+  room: null,
   profile: null,
   session: null,
-  users: [],
+  friends: [],
+  requests: [],
+  searchUser: null,
   realtimeChannel: null,
   seenMessageIds: new Set(),
-  activeChat: { type: 'general', peerId: null, peerUsername: null },
+  activeChat: { type: 'none', peerId: null, peerUsername: null, peerAvatarUrl: null, peerBio: null },
+  typingUsers: {},
 };
 
 const fallbackConfig = {
@@ -100,7 +120,7 @@ function loadActiveChat() {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
-    if (parsed.type !== 'dm' && parsed.type !== 'general') return null;
+    if (parsed.type !== 'dm') return null;
     return {
       type: parsed.type,
       peerId: parsed.peerId || null,
@@ -119,6 +139,51 @@ function addSystemMessage(text) {
   bubble.textContent = text;
   msg.appendChild(bubble);
   ui.messages.appendChild(msg);
+}
+
+function setHint(target, text, tone = 'muted') {
+  if (!target) return;
+  target.textContent = text || '';
+  if (!text) {
+    target.style.color = '';
+    return;
+  }
+  if (tone === 'error') target.style.color = 'rgba(255, 180, 180, 0.95)';
+  if (tone === 'ok') target.style.color = 'rgba(170, 255, 200, 0.95)';
+  if (tone === 'muted') target.style.color = '';
+}
+
+function setAvatar(target, avatarUrl, fallbackName) {
+  if (!target) return;
+  const url = String(avatarUrl || '').trim();
+  if (url) {
+    target.classList.add('has-img');
+    target.style.backgroundImage = `url("${url}")`;
+    target.textContent = firstLetter(fallbackName);
+    return;
+  }
+
+  target.classList.remove('has-img');
+  target.style.backgroundImage = '';
+  target.textContent = firstLetter(fallbackName);
+}
+
+function setChatSubline(text) {
+  const v = String(text || '').trim();
+  if (!ui.chatSubline) return;
+  if (!v) {
+    ui.chatSubline.textContent = '';
+    ui.chatSubline.classList.remove('show');
+    return;
+  }
+  ui.chatSubline.textContent = v;
+  requestAnimationFrame(() => ui.chatSubline.classList.add('show'));
+}
+
+function setChatEnabled(enabled) {
+  ui.msgInput.disabled = !enabled;
+  ui.sendBtn.disabled = !enabled;
+  if (!enabled) ui.msgInput.value = '';
 }
 
 function initNotifier() {
@@ -233,116 +298,237 @@ function renderMessage(row) {
   if (shouldStick) scrollMessagesToBottom();
 }
 
-function renderUsers(users) {
-  ui.usersList.innerHTML = '';
+function isFriend(userId) {
+  return state.friends.some((f) => f.id === userId);
+}
 
-  const meId = state.session?.user?.id || null;
-  const q = String(ui.userSearch.value || '').trim().toLowerCase();
-  const filtered = users.filter((u) => {
-    if (!q) return true;
-    return String(u.username || '').toLowerCase().includes(q);
-  });
+function hasPendingWith(userId) {
+  return state.requests.some((r) => r.user_id === userId && r.status === 'pending');
+}
 
-  if (!q) {
-    const general = document.createElement('div');
-    general.className = `contact ${state.activeChat.type === 'general' ? 'active' : ''}`;
+function renderEmpty(container, title, subtitle) {
+  container.innerHTML = '';
+  const empty = document.createElement('div');
+  empty.className = 'contact';
+  const info = document.createElement('div');
+  info.className = 'contact-info';
+  const name = document.createElement('div');
+  name.className = 'name';
+  name.textContent = title;
+  const preview = document.createElement('div');
+  preview.className = 'preview';
+  preview.textContent = subtitle;
+  info.appendChild(name);
+  info.appendChild(preview);
+  empty.appendChild(info);
+  container.appendChild(empty);
+}
 
-    const avatar = document.createElement('div');
-    avatar.className = 'avatar online';
-    avatar.textContent = 'G';
+function renderSearchResult() {
+  const container = ui.searchResult;
+  if (!container) return;
 
-    const info = document.createElement('div');
-    info.className = 'contact-info';
-
-    const name = document.createElement('div');
-    name.className = 'name';
-    name.textContent = 'General';
-
-    const preview = document.createElement('div');
-    preview.className = 'preview';
-    preview.textContent = 'Sala general';
-
-    info.appendChild(name);
-    info.appendChild(preview);
-    general.appendChild(avatar);
-    general.appendChild(info);
-    general.addEventListener('click', () => {
-      setActiveChat({ type: 'general', peerId: null, peerUsername: null });
-    });
-
-    ui.usersList.appendChild(general);
-  }
-
-  if (filtered.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'contact';
-    const info = document.createElement('div');
-    info.className = 'contact-info';
-    const name = document.createElement('div');
-    name.className = 'name';
-    name.textContent = 'Sin resultados';
-    const preview = document.createElement('div');
-    preview.className = 'preview';
-    preview.textContent = 'Prueba con otro nombre…';
-    info.appendChild(name);
-    info.appendChild(preview);
-    empty.appendChild(info);
-    ui.usersList.appendChild(empty);
+  const u = state.searchUser;
+  if (!u) {
+    renderEmpty(container, 'Busca por username', 'Escribe el username exacto y presiona buscar.');
     return;
   }
 
-  for (const u of filtered) {
+  container.innerHTML = '';
+
+  const row = document.createElement('div');
+  row.className = 'contact';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  setAvatar(avatar, u.avatar_url, u.username);
+
+  const info = document.createElement('div');
+  info.className = 'contact-info';
+
+  const name = document.createElement('div');
+  name.className = 'name';
+  name.textContent = u.username;
+
+  const preview = document.createElement('div');
+  preview.className = 'preview';
+  preview.textContent = u.bio ? u.bio : 'Usuario encontrado';
+
+  info.appendChild(name);
+  info.appendChild(preview);
+
+  const actions = document.createElement('div');
+  actions.className = 'contact-actions';
+
+  const btn = document.createElement('button');
+  btn.className = 'mini-btn';
+  btn.type = 'button';
+
+  if (isFriend(u.id)) {
+    btn.textContent = 'Amigo';
+    btn.disabled = true;
+  } else if (hasPendingWith(u.id)) {
+    btn.textContent = 'Enviado';
+    btn.disabled = true;
+  } else {
+    btn.textContent = 'Agregar';
+    btn.addEventListener('click', async () => {
+      await enviarSolicitud(u.id);
+    });
+  }
+
+  actions.appendChild(btn);
+
+  row.appendChild(avatar);
+  row.appendChild(info);
+  row.appendChild(actions);
+
+  container.appendChild(row);
+}
+
+function renderRequests() {
+  const container = ui.requestsList;
+  if (!container) return;
+
+  const list = state.requests.filter((r) => r.status === 'pending');
+  if (list.length === 0) {
+    renderEmpty(container, 'Sin solicitudes', 'Cuando te envíen una, aparecerá aquí.');
+    return;
+  }
+
+  container.innerHTML = '';
+
+  for (const r of list) {
     const row = document.createElement('div');
-    const isPeer = state.activeChat.type === 'dm' && state.activeChat.peerId === u.id;
-    row.className = `contact ${isPeer ? 'active' : ''}`;
+    row.className = 'contact';
 
     const avatar = document.createElement('div');
     avatar.className = 'avatar';
-    avatar.textContent = firstLetter(u.username);
+    setAvatar(avatar, r.avatar_url, r.username);
 
     const info = document.createElement('div');
     info.className = 'contact-info';
 
     const name = document.createElement('div');
     name.className = 'name';
-    name.textContent = u.username + (u.id === meId ? ' (tú)' : '');
+    name.textContent = r.direction === 'in' ? `${r.username}` : `${r.username}`;
 
     const preview = document.createElement('div');
     preview.className = 'preview';
-    preview.textContent = u.id === meId ? 'Tu perfil' : 'Usuario registrado';
+    preview.textContent = r.direction === 'in' ? 'Quiere agregarte' : 'Solicitud enviada';
 
     info.appendChild(name);
     info.appendChild(preview);
+
+    const actions = document.createElement('div');
+    actions.className = 'contact-actions';
+
+    if (r.direction === 'in') {
+      const ok = document.createElement('button');
+      ok.className = 'mini-btn';
+      ok.type = 'button';
+      ok.textContent = 'Aceptar';
+      ok.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await aceptarSolicitud(r.id);
+      });
+
+      const no = document.createElement('button');
+      no.className = 'mini-btn danger';
+      no.type = 'button';
+      no.textContent = 'Rechazar';
+      no.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await rechazarSolicitud(r.id);
+      });
+
+      actions.appendChild(ok);
+      actions.appendChild(no);
+    } else {
+      const cancel = document.createElement('button');
+      cancel.className = 'mini-btn danger';
+      cancel.type = 'button';
+      cancel.textContent = 'Cancelar';
+      cancel.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await cancelarSolicitud(r.id);
+      });
+      actions.appendChild(cancel);
+    }
+
     row.appendChild(avatar);
     row.appendChild(info);
-    row.addEventListener('click', () => {
-      if (!u.id || u.id === meId) return;
-      setActiveChat({ type: 'dm', peerId: u.id, peerUsername: u.username || 'Usuario' });
-    });
-    ui.usersList.appendChild(row);
+    row.appendChild(actions);
+    container.appendChild(row);
   }
 }
 
-async function setActiveChat(next) {
-  const meId = state.session?.user?.id || null;
-  if (next.type === 'dm') {
-    if (!meId || !next.peerId) return;
-    state.activeChat = {
-      type: 'dm',
-      peerId: next.peerId,
-      peerUsername: next.peerUsername || 'Usuario',
-    };
-    state.room = makeDmRoom(meId, next.peerId);
-    ui.roomName.textContent = state.activeChat.peerUsername || 'Chat';
-  } else {
-    state.activeChat = { type: 'general', peerId: null, peerUsername: null };
-    state.room = 'general';
-    ui.roomName.textContent = 'General';
+function renderFriends() {
+  const container = ui.friendsList;
+  if (!container) return;
+
+  if (!state.friends || state.friends.length === 0) {
+    renderEmpty(container, 'Sin amigos', 'Agrega a alguien por username.');
+    return;
   }
 
+  container.innerHTML = '';
+
+  for (const f of state.friends) {
+    const row = document.createElement('div');
+    const isActive = state.activeChat.type === 'dm' && state.activeChat.peerId === f.id;
+    row.className = `contact ${isActive ? 'active' : ''}`;
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    setAvatar(avatar, f.avatar_url, f.username);
+
+    const info = document.createElement('div');
+    info.className = 'contact-info';
+
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = f.username;
+
+    const preview = document.createElement('div');
+    preview.className = 'preview';
+    preview.textContent = f.bio ? f.bio : 'Amigo';
+
+    info.appendChild(name);
+    info.appendChild(preview);
+
+    row.appendChild(avatar);
+    row.appendChild(info);
+    row.addEventListener('click', async () => {
+      await setActiveChat(f);
+    });
+
+    container.appendChild(row);
+  }
+}
+
+async function setActiveChat(friend) {
+  const meId = state.session?.user?.id || null;
+  if (!meId || !friend?.id) return;
+
+  state.activeChat = {
+    type: 'dm',
+    peerId: friend.id,
+    peerUsername: friend.username || 'Usuario',
+    peerAvatarUrl: friend.avatar_url || '',
+    peerBio: friend.bio || '',
+  };
+
+  state.room = makeDmRoom(meId, friend.id);
+  ui.roomName.textContent = state.activeChat.peerUsername;
+  ui.roomStatus.textContent = 'Conectado';
+  setChatSubline(state.activeChat.peerBio);
+  setAvatar(ui.roomAvatar, state.activeChat.peerAvatarUrl, state.activeChat.peerUsername);
   saveActiveChat();
-  renderUsers(state.users);
+  renderFriends();
   closeSidebar();
+  setChatEnabled(true);
+
   ui.roomStatus.textContent = 'Cargando…';
   teardownRealtime();
   await loadMessages();
@@ -350,15 +536,79 @@ async function setActiveChat(next) {
   requestAnimationFrame(() => scrollMessagesToBottom());
 }
 
-async function loadUsers() {
-  const { data, error } = await state.supabase
-    .from('usuarios')
-    .select('id, username, created_at')
-    .order('username', { ascending: true });
+async function loadFriends() {
+  const { data, error } = await state.supabase.rpc('get_amigos');
+  if (error) {
+    state.friends = [];
+    return;
+  }
+  state.friends = Array.isArray(data) ? data : [];
+}
+
+async function loadRequests() {
+  const { data, error } = await state.supabase.rpc('get_solicitudes');
+  if (error) {
+    state.requests = [];
+    return;
+  }
+  state.requests = Array.isArray(data) ? data : [];
+}
+
+async function buscarUsuarioExacto() {
+  const q = String(ui.userSearch.value || '').trim();
+  if (!q) {
+    state.searchUser = null;
+    renderSearchResult();
+    return;
+  }
+
+  const { data, error } = await state.supabase.rpc('buscar_usuario', { p_username: q });
+  if (error || !Array.isArray(data) || data.length === 0) {
+    state.searchUser = null;
+    renderSearchResult();
+    return;
+  }
+
+  state.searchUser = data[0];
+  renderSearchResult();
+}
+
+async function enviarSolicitud(targetId) {
+  const fromId = state.session?.user?.id;
+  if (!fromId) return;
+
+  const { error } = await state.supabase.from('solicitudes_amistad').insert({
+    from_id: fromId,
+    to_id: targetId,
+    status: 'pending',
+  });
 
   if (error) return;
-  state.users = Array.isArray(data) ? data : [];
-  renderUsers(state.users);
+  await loadRequests();
+  renderRequests();
+  renderSearchResult();
+}
+
+async function aceptarSolicitud(id) {
+  const { error } = await state.supabase.rpc('aceptar_solicitud', { solicitud_id: id });
+  if (error) return;
+  await Promise.all([loadFriends(), loadRequests()]);
+  renderFriends();
+  renderRequests();
+}
+
+async function rechazarSolicitud(id) {
+  const { error } = await state.supabase.rpc('rechazar_solicitud', { solicitud_id: id });
+  if (error) return;
+  await loadRequests();
+  renderRequests();
+}
+
+async function cancelarSolicitud(id) {
+  const { error } = await state.supabase.rpc('cancelar_solicitud', { solicitud_id: id });
+  if (error) return;
+  await loadRequests();
+  renderRequests();
 }
 
 async function loadProfile() {
@@ -369,13 +619,15 @@ async function loadProfile() {
   for (let attempt = 0; attempt < 6; attempt += 1) {
     const { data, error } = await state.supabase
       .from('usuarios')
-      .select('id, username')
+      .select('id, username, avatar_url, bio')
       .eq('id', userId)
       .maybeSingle();
 
     if (!error && data) {
       state.profile = data;
       ui.meLine.textContent = `@${data.username}`;
+      setAvatar(ui.profileAvatar, data.avatar_url, data.username);
+      ui.bioInput.value = data.bio || '';
       return;
     }
 
@@ -390,6 +642,13 @@ async function loadProfile() {
 async function loadMessages() {
   state.seenMessageIds = new Set();
   ui.messages.innerHTML = '';
+  ui.typingIndicator.classList.add('hidden');
+  ui.typingIndicator.textContent = '';
+
+  if (!state.room) {
+    addSystemMessage('Busca a alguien por username, envía solicitud y espera a que acepte.');
+    return;
+  }
 
   const { data, error } = await state.supabase
     .from('mensajes')
@@ -422,6 +681,7 @@ function teardownRealtime() {
 
 function setupRealtime() {
   teardownRealtime();
+  if (!state.room) return;
   ui.roomStatus.textContent = 'Conectando…';
 
   state.realtimeChannel = state.supabase
@@ -534,6 +794,7 @@ async function sendMessage(text) {
   if (!clean) return;
   if (clean.length > 1000) throw new Error('Máximo 1000 caracteres.');
   if (!state.profile?.username) throw new Error('Perfil inválido.');
+  if (!state.room || state.activeChat.type !== 'dm') throw new Error('Selecciona un amigo para chatear.');
 
   ui.sendBtn.disabled = true;
 
@@ -564,8 +825,109 @@ function closeSidebar() {
   document.querySelector('.app').classList.remove('sidebar-open');
 }
 
+function openProfile() {
+  setHint(ui.profileHint, '');
+  ui.profileModal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeProfile() {
+  ui.profileModal.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+async function saveProfile() {
+  const userId = state.session?.user?.id;
+  if (!userId) return;
+
+  const bio = String(ui.bioInput.value || '').trim();
+
+  const { error } = await state.supabase
+    .from('usuarios')
+    .update({ bio })
+    .eq('id', userId);
+
+  if (error) {
+    setHint(ui.profileHint, 'No se pudo guardar.', 'error');
+    return;
+  }
+
+  state.profile.bio = bio;
+  setHint(ui.profileHint, 'Guardado.', 'ok');
+}
+
+async function resizeImage(file, maxSize = 256) {
+  const bitmap = await createImageBitmap(file);
+  const ratio = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * ratio));
+  const h = Math.max(1, Math.round(bitmap.height * ratio));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  const blob = await new Promise((resolve) => {
+    canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.86);
+  });
+  if (!blob) throw new Error('No se pudo procesar la imagen.');
+  return blob;
+}
+
+async function uploadAvatar() {
+  const userId = state.session?.user?.id;
+  if (!userId) return;
+
+  const file = ui.avatarInput.files?.[0] || null;
+  if (!file) {
+    setHint(ui.profileHint, 'Selecciona una imagen.', 'muted');
+    return;
+  }
+
+  ui.uploadAvatarBtn.disabled = true;
+  setHint(ui.profileHint, 'Subiendo…', 'muted');
+
+  try {
+    const blob = await resizeImage(file);
+    const path = `${userId}/avatar.jpg`;
+    const { error: upErr } = await state.supabase.storage
+      .from('avatars')
+      .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+    if (upErr) throw upErr;
+
+    const { data } = state.supabase.storage.from('avatars').getPublicUrl(path);
+    const avatarUrl = `${data.publicUrl}?v=${Date.now()}`;
+
+    const { error: dbErr } = await state.supabase
+      .from('usuarios')
+      .update({ avatar_url: avatarUrl })
+      .eq('id', userId);
+    if (dbErr) throw dbErr;
+
+    state.profile.avatar_url = avatarUrl;
+    setAvatar(ui.profileAvatar, avatarUrl, state.profile.username);
+    setHint(ui.profileHint, 'Foto actualizada.', 'ok');
+  } catch {
+    setHint(ui.profileHint, 'No se pudo subir la foto. Revisa bucket/policies.', 'error');
+  } finally {
+    ui.uploadAvatarBtn.disabled = false;
+  }
+}
+
 function wireUi() {
-  ui.userSearch.addEventListener('input', () => renderUsers(state.users));
+  ui.searchUserBtn.addEventListener('click', async () => {
+    await buscarUsuarioExacto();
+  });
+  ui.userSearch.addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    await buscarUsuarioExacto();
+  });
+  ui.userSearch.addEventListener('input', () => {
+    if (String(ui.userSearch.value || '').trim().length === 0) {
+      state.searchUser = null;
+      renderSearchResult();
+    }
+  });
 
   ui.msgInput.addEventListener('input', () => {
     autosizeTextarea();
@@ -594,6 +956,12 @@ function wireUi() {
     await state.supabase.auth.signOut();
     goToLogin();
   });
+
+  ui.profileBtn.addEventListener('click', openProfile);
+  ui.closeProfileBtn.addEventListener('click', closeProfile);
+  ui.profileBackdrop.addEventListener('click', closeProfile);
+  ui.saveProfileBtn.addEventListener('click', saveProfile);
+  ui.uploadAvatarBtn.addEventListener('click', uploadAvatar);
 
   ui.openSidebarBtn.addEventListener('click', openSidebar);
   ui.closeSidebarBtn.addEventListener('click', closeSidebar);
@@ -654,21 +1022,34 @@ async function init() {
 
   try {
     await loadProfile();
-    await loadUsers();
+    await Promise.all([loadFriends(), loadRequests()]);
+    renderSearchResult();
+    renderRequests();
+    renderFriends();
 
     const restored = loadActiveChat();
-    if (restored?.type === 'dm' && restored.peerId && restored.peerId !== state.session.user.id) {
-      const found = state.users.find((u) => u.id === restored.peerId);
-      await setActiveChat({
-        type: 'dm',
-        peerId: restored.peerId,
-        peerUsername: found?.username || restored.peerUsername || 'Usuario',
-      });
+    const restoredFriend =
+      restored?.type === 'dm' && restored.peerId ? state.friends.find((f) => f.id === restored.peerId) : null;
+
+    if (restoredFriend) {
+      await setActiveChat(restoredFriend);
       return;
     }
 
-    await setActiveChat({ type: 'general', peerId: null, peerUsername: null });
-    requestAnimationFrame(() => scrollMessagesToBottom());
+    if (state.friends.length > 0) {
+      await setActiveChat(state.friends[0]);
+      return;
+    }
+
+    state.room = null;
+    state.activeChat = { type: 'none', peerId: null, peerUsername: null, peerAvatarUrl: null, peerBio: null };
+    ui.roomName.textContent = 'InfraChat';
+    ui.roomStatus.textContent = 'Agrega amigos para chatear';
+    setChatSubline('');
+    setAvatar(ui.roomAvatar, '', 'I');
+    setChatEnabled(false);
+    teardownRealtime();
+    await loadMessages();
   } catch (e) {
     teardownRealtime();
     await state.supabase.auth.signOut();

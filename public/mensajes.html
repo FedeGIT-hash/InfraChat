@@ -27,11 +27,25 @@
           <button class="icon-btn mobile-only" id="closeSidebarBtn" type="button" aria-label="Cerrar menú">✕</button>
         </div>
 
-        <div class="search-bar">
-          <input id="userSearch" type="text" placeholder="Buscar usuario…" />
+        <div class="search-bar search-add">
+          <input id="userSearch" type="text" placeholder="Buscar username exacto…" />
+          <button class="icon-btn" id="searchUserBtn" type="button" aria-label="Buscar">⌕</button>
         </div>
 
-        <div class="contacts" id="usersList" aria-label="Usuarios"></div>
+        <div class="list-group">
+          <div class="list-title">Resultado</div>
+          <div class="contacts" id="searchResult" aria-label="Resultado búsqueda"></div>
+        </div>
+
+        <div class="list-group">
+          <div class="list-title">Solicitudes</div>
+          <div class="contacts" id="requestsList" aria-label="Solicitudes"></div>
+        </div>
+
+        <div class="list-group">
+          <div class="list-title">Amigos</div>
+          <div class="contacts" id="friendsList" aria-label="Amigos"></div>
+        </div>
       </aside>
 
       <main class="chat-area">
@@ -41,8 +55,10 @@
           <div class="chat-header-info">
             <div class="name" id="roomName">General</div>
             <div class="status" id="roomStatus">Conectado</div>
+            <div class="sub" id="chatSubline"></div>
           </div>
           <div class="chat-header-actions">
+            <button class="pill" id="profileBtn" type="button">Perfil</button>
             <button class="pill" id="signOutBtn" type="button">Salir</button>
           </div>
         </div>
@@ -58,6 +74,33 @@
         </form>
       </main>
     </section>
+  </div>
+
+  <div class="modal hidden" id="profileModal" role="dialog" aria-modal="true" aria-label="Perfil">
+    <div class="modal-backdrop" id="profileBackdrop"></div>
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">Mi perfil</div>
+        <button class="icon-btn" id="closeProfileBtn" type="button" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="profile-row">
+          <div class="avatar big" id="profileAvatar">?</div>
+          <div class="profile-actions">
+            <input id="avatarInput" type="file" accept="image/*" />
+            <button class="btn" id="uploadAvatarBtn" type="button">Subir foto</button>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Descripción</span>
+          <textarea id="bioInput" rows="3" maxlength="160" placeholder="Escribe algo sobre ti…"></textarea>
+        </label>
+
+        <button class="btn primary" id="saveProfileBtn" type="button">Guardar</button>
+        <p class="hint" id="profileHint"></p>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="/mensajes.js"></script>
