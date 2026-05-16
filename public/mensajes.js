@@ -180,36 +180,116 @@ function setChatEnabled(enabled) {
 }
 
 function initNotifier() {
+  try {
+    notifier.audio = new Audio('/api/noti');
+    notifier.audio.preload = 'auto';
+    notifier.audio.volume = 0.9;
+    notifier.audio.playsInline = true;
+    notifier.audio.addEventListener('error', () => {
+      const src = notifier.audio?.currentSrc || notifier.audio?.src || '';
+      if (src.includes('/api/noti')) {
+        notifier.audio.src = '/noti.mp3';
+        notifier.audio.load();
+      }
+    });
+  } catch {
+    notifier.audio = null;
+  }
+
   const unlock = async () => {
     if (notifier.unlocked) return;
+    let ok = false;
+
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return;
-      if (!notifier.audioCtx) {
-        notifier.audioCtx = new Ctx();
-        notifier.gain = notifier.audioCtx.createGain();
-        notifier.gain.gain.value = 0.9;
-        notifier.gain.connect(notifier.audioCtx.destination);
+      if (Ctx) {
+        if (!notifier.audioCtx) {
+          notifier.audioCtx = new Ctx();
+          notifier.gain = notifier.audioCtx.createGain();
+          notifier.gain.gain.value = 0.9;
+          notifier.gain.connect(notifier.audioCtx.destination);
+        }
+        if (notifier.audioCtx.state !== 'running') await notifier.audioCtx.resume();
+
+        const osc = notifier.audioCtx.createOscillator();
+        const g = notifier.audioCtx.createGain();
+        g.gain.value = 0;
+        osc.connect(g);
+        g.connect(notifier.audioCtx.destination);
+        osc.start();
+        osc.stop(notifier.audioCtx.currentTime + 0.01);
+        ok = true;
       }
-      if (notifier.audioCtx.state !== 'running') await notifier.audioCtx.resume();
-      notifier.unlocked = true;
-      void preloadNotificationSound();
     } catch {
-      notifier.unlocked = false;
+      ok = ok || false;
     }
+
+    try {
+      if (notifier.audio) {
+        const prevMuted = notifier.audio.muted;
+        notifier.audio.muted = true;
+        await notifier.audio.play();
+        notifier.audio.pause();
+        notifier.audio.currentTime = 0;
+        notifier.audio.muted = prevMuted;
+        ok = true;
+      }
+    } catch {
+      ok = ok || false;
+    }
+
+    notifier.unlocked = ok;
+    if (ok) void preloadNotificationSound();
   };
 
-  document.addEventListener('pointerdown', unlock, { once: true });
+  const onceOpts = { once: true, passive: true };
+  document.addEventListener('touchstart', unlock, onceOpts);
+  document.addEventListener('pointerdown', unlock, onceOpts);
+  document.addEventListener('click', unlock, onceOpts);
   document.addEventListener('keydown', unlock, { once: true });
+
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!notifier.audioCtx) return;
+    try {
+      if (notifier.audioCtx.state !== 'running') await notifier.audioCtx.resume();
+    } catch {
+      return;
+    }
+  });
 }
 
 async function playNotification() {
   if (!notifier.enabled) return;
   if (!notifier.unlocked) return;
-  if (!notifier.audioCtx || !notifier.gain) return;
+  if (!notifier.audioCtx || !notifier.gain) {
+    try {
+      const src = notifier.audio?.currentSrc || notifier.audio?.src || '/api/noti';
+      const a = new Audio(src);
+      a.preload = 'auto';
+      a.volume = 0.9;
+      a.playsInline = true;
+      await a.play();
+      return;
+    } catch {
+      return;
+    }
+  }
 
   if (!notifier.ready) await preloadNotificationSound();
-  if (!notifier.buffer) return;
+  if (!notifier.buffer) {
+    try {
+      const src = notifier.audio?.currentSrc || notifier.audio?.src || '/api/noti';
+      const a = new Audio(src);
+      a.preload = 'auto';
+      a.volume = 0.9;
+      a.playsInline = true;
+      await a.play();
+      return;
+    } catch {
+      return;
+    }
+  }
 
   const now = Date.now();
   if (now - notifier.lastPlayedAt < 700) return;
@@ -221,9 +301,18 @@ async function playNotification() {
     source.connect(notifier.gain);
     source.start(0);
   } catch {
-    if (!notifier.warnedMissing) {
-      notifier.warnedMissing = true;
-      addSystemMessage('Toca la pantalla para activar sonido de notificaciones.');
+    try {
+      const src = notifier.audio?.currentSrc || notifier.audio?.src || '/api/noti';
+      const a = new Audio(src);
+      a.preload = 'auto';
+      a.volume = 0.9;
+      a.playsInline = true;
+      await a.play();
+    } catch {
+      if (!notifier.warnedMissing) {
+        notifier.warnedMissing = true;
+        addSystemMessage('Toca la pantalla para activar sonido de notificaciones.');
+      }
     }
   }
 }
