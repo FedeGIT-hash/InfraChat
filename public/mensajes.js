@@ -403,11 +403,14 @@ function describeMicError(err) {
 async function primeRemoteAudio() {
   if (!ui.remoteAudio) return;
   try {
-    const wasMuted = ui.remoteAudio.muted;
-    ui.remoteAudio.muted = true;
-    await ui.remoteAudio.play();
-    ui.remoteAudio.pause();
-    ui.remoteAudio.muted = wasMuted;
+    const run = async () => {
+      const wasMuted = ui.remoteAudio.muted;
+      ui.remoteAudio.muted = true;
+      await ui.remoteAudio.play();
+      ui.remoteAudio.pause();
+      ui.remoteAudio.muted = wasMuted;
+    };
+    await Promise.race([run(), new Promise((resolve) => setTimeout(resolve, 400))]);
   } catch {
     return;
   }
@@ -513,7 +516,7 @@ async function startOutgoingCall() {
   setCallUi('outgoing');
   setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Llamando…', 'Pidiendo conexión al micrófono…');
   showCallHint('Permite el micrófono para iniciar la llamada.', 'muted');
-  await primeRemoteAudio();
+  void primeRemoteAudio();
 
   let localStream = null;
   try {
@@ -586,7 +589,7 @@ async function acceptIncomingCall() {
   setCallUi('in_call');
   setCallCard(state.call.peerUsername, state.call.peerAvatarUrl, 'Conectando…', 'Pidiendo micrófono…');
   showCallHint('Permite el micrófono para contestar.', 'muted');
-  await primeRemoteAudio();
+  void primeRemoteAudio();
 
   let localStream = null;
   try {
