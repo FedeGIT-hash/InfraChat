@@ -38,6 +38,8 @@ const state = {
   requests: [],
   searchUser: null,
   realtimeChannel: null,
+  socialChannel: null,
+  socialRefreshTimer: null,
   seenMessageIds: new Set(),
   activeChat: { type: 'none', peerId: null, peerUsername: null, peerAvatarUrl: null, peerBio: null },
   typingUsers: {},
@@ -421,7 +423,9 @@ function renderRequests() {
       ok.textContent = 'Aceptar';
       ok.addEventListener('click', async (e) => {
         e.stopPropagation();
+        ok.disabled = true;
         await aceptarSolicitud(r.id);
+        ok.disabled = false;
       });
 
       const no = document.createElement('button');
@@ -430,7 +434,9 @@ function renderRequests() {
       no.textContent = 'Rechazar';
       no.addEventListener('click', async (e) => {
         e.stopPropagation();
+        no.disabled = true;
         await rechazarSolicitud(r.id);
+        no.disabled = false;
       });
 
       actions.appendChild(ok);
@@ -442,7 +448,9 @@ function renderRequests() {
       cancel.textContent = 'Cancelar';
       cancel.addEventListener('click', async (e) => {
         e.stopPropagation();
+        cancel.disabled = true;
         await cancelarSolicitud(r.id);
+        cancel.disabled = false;
       });
       actions.appendChild(cancel);
     }
@@ -530,6 +538,7 @@ async function setActiveChat(friend) {
 async function loadFriends() {
   const { data, error } = await state.supabase.rpc('get_amigos');
   if (error) {
+    console.error('loadFriends error', error);
     state.friends = [];
     return;
   }
@@ -539,6 +548,7 @@ async function loadFriends() {
 async function loadRequests() {
   const { data, error } = await state.supabase.rpc('get_solicitudes');
   if (error) {
+    console.error('loadRequests error', error);
     state.requests = [];
     return;
   }
@@ -568,38 +578,64 @@ async function enviarSolicitud(targetId) {
   const fromId = state.session?.user?.id;
   if (!fromId) return;
 
-  const { error } = await state.supabase.from('solicitudes_amistad').insert({
-    from_id: fromId,
-    to_id: targetId,
-    status: 'pending',
-  });
+  const { error } = await state.supabase
+    .from('solicitudes_amistad')
+    .insert({
+      from_id: fromId,
+      to_id: targetId,
+      status: 'pending',
+    })
+    .select('id')
+    .maybeSingle();
 
-  if (error) return;
+  if (error) {
+    console.error('enviarSolicitud error', error);
+    addSystemMessage(error.message || 'No se pudo enviar la solicitud.');
+    return;
+  }
   await loadRequests();
   renderRequests();
   renderSearchResult();
+  addSystemMessage('Solicitud enviada.');
 }
 
 async function aceptarSolicitud(id) {
   const { error } = await state.supabase.rpc('aceptar_solicitud', { solicitud_id: id });
-  if (error) return;
+  if (error) {
+    console.error('aceptarSolicitud error', error);
+    addSystemMessage(error.message || 'No se pudo aceptar.');
+    return;
+  }
   await Promise.all([loadFriends(), loadRequests()]);
   renderFriends();
   renderRequests();
+  renderSearchResult();
+  addSystemMessage('Solicitud aceptada.');
 }
 
 async function rechazarSolicitud(id) {
   const { error } = await state.supabase.rpc('rechazar_solicitud', { solicitud_id: id });
-  if (error) return;
+  if (error) {
+    console.error('rechazarSolicitud error', error);
+    addSystemMessage(error.message || 'No se pudo rechazar.');
+    return;
+  }
   await loadRequests();
   renderRequests();
+  addSystemMessage('Solicitud rechazada.');
 }
 
 async function cancelarSolicitud(id) {
   const { error } = await state.supabase.rpc('cancelar_solicitud', { solicitud_id: id });
-  if (error) return;
+  if (error) {
+    console.error('cancelarSolicitud error', error);
+    addSystemMessage(error.message || 'No se pudo cancelar.');
+    return;
+  }
   await loadRequests();
   renderRequests();
+  renderSearchResult();
+  addSystemMessage('Solicitud cancelada.');
 }
 
 async function loadProfile() {
@@ -666,6 +702,51 @@ function teardownRealtime() {
   state.realtimeChannel = null;
   state.typingUsers = {};
   renderTypingIndicator();
+}
+
+function teardownSocialRealtime() {
+  if (!state.socialChannel) return;
+  state.supabase.removeChannel(state.socialChannel);
+  state.socialChannel = null;
+  if (state.socialRefreshTimer) clearTimeout(state.socialRefreshTimer);
+  state.socialRefreshTimer = null;
+}
+
+function scheduleSocialRefresh() {
+  if (state.socialRefreshTimer) return;
+  state.socialRefreshTimer = setTimeout(async () => {
+    state.socialRefreshTimer = null;
+    await Promise.all([loadFriends(), loadRequests()]);
+    renderFriends();
+    renderRequests();
+    renderSearchResult();
+  }, 220);
+}
+
+function setupSocialRealtime() {
+  teardownSocialRealtime();
+  const uid = state.session?.user?.id || null;
+  if (!uid) return;
+
+  state.socialChannel = state.supabase
+    .channel(`social:${uid}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'solicitudes_amistad', filter: `to_id=eq.${uid}` }, () => {
+      scheduleSocialRefresh();
+    })
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'solicitudes_amistad', filter: `from_id=eq.${uid}` },
+      () => {
+        scheduleSocialRefresh();
+      },
+    )
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'amistades', filter: `user1=eq.${uid}` }, () => {
+      scheduleSocialRefresh();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'amistades', filter: `user2=eq.${uid}` }, () => {
+      scheduleSocialRefresh();
+    })
+    .subscribe();
 }
 
 function setupRealtime() {
@@ -910,9 +991,17 @@ async function init() {
     return;
   }
 
+  setupSocialRealtime();
+
   state.supabase.auth.onAuthStateChange((_event, session) => {
     state.session = session;
-    if (!session) goToLogin();
+    if (!session) {
+      teardownSocialRealtime();
+      teardownRealtime();
+      goToLogin();
+      return;
+    }
+    setupSocialRealtime();
   });
 
   try {
