@@ -460,7 +460,44 @@ async function flushPendingCandidates() {
 
 async function sendCallEvent(toId, event, payload) {
   if (!toId) return false;
+  if (state.call.channel && state.call.peerId === toId) {
+    try {
+      await state.call.channel.send({ type: 'broadcast', event, payload });
+      return true;
+    } catch {
+      return false;
+    }
+  }
   return sendBroadcast(`calls:${toId}`, event, payload);
+}
+
+async function ensureCallOutChannel(peerId, timeoutMs = 2200) {
+  if (!peerId) return null;
+  if (state.call.channel && state.call.peerId === peerId) return state.call.channel;
+  if (state.call.channel) {
+    state.supabase.removeChannel(state.call.channel);
+    state.call.channel = null;
+  }
+
+  const ch = state.supabase.channel(`calls:${peerId}`);
+  let subscribed = false;
+  const ok = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    ch.subscribe((status) => {
+      if (status !== 'SUBSCRIBED') return;
+      if (subscribed) return;
+      subscribed = true;
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+
+  if (!ok) {
+    state.supabase.removeChannel(ch);
+    return null;
+  }
+  state.call.channel = ch;
+  return ch;
 }
 
 async function hangupCall(shouldNotifyPeer = true) {
@@ -518,6 +555,13 @@ async function startOutgoingCall() {
   showCallHint('Permite el micrófono para iniciar la llamada.', 'muted');
   void primeRemoteAudio();
 
+  const outCh = await ensureCallOutChannel(peerId);
+  if (!outCh) {
+    showCallHint('No se pudo conectar con la señalización.', 'error');
+    await hangupCall(false);
+    return;
+  }
+
   let localStream = null;
   try {
     localStream = await getLocalAudioStream();
@@ -537,7 +581,10 @@ async function startOutgoingCall() {
 
   const gathered = [];
   pc.onicecandidate = (ev) => {
-    if (ev.candidate) gathered.push(ev.candidate);
+    if (!ev.candidate) return;
+    const cand = typeof ev.candidate.toJSON === 'function' ? ev.candidate.toJSON() : ev.candidate;
+    gathered.push(cand);
+    void sendCallEvent(peerId, 'call:ice', { callId, fromId: meId, toId: peerId, candidate: cand });
   };
 
   try {
@@ -591,6 +638,13 @@ async function acceptIncomingCall() {
   showCallHint('Permite el micrófono para contestar.', 'muted');
   void primeRemoteAudio();
 
+  const outCh = await ensureCallOutChannel(peerId);
+  if (!outCh) {
+    showCallHint('No se pudo conectar con la señalización.', 'error');
+    await hangupCall(false);
+    return;
+  }
+
   let localStream = null;
   try {
     localStream = await getLocalAudioStream();
@@ -611,7 +665,10 @@ async function acceptIncomingCall() {
 
   const gathered = [];
   pc.onicecandidate = (ev) => {
-    if (ev.candidate) gathered.push(ev.candidate);
+    if (!ev.candidate) return;
+    const cand = typeof ev.candidate.toJSON === 'function' ? ev.candidate.toJSON() : ev.candidate;
+    gathered.push(cand);
+    void sendCallEvent(peerId, 'call:ice', { callId, fromId: meId, toId: peerId, candidate: cand });
   };
 
   try {
@@ -1556,10 +1613,9 @@ function setupCallInboxRealtime() {
       if (p.toId !== meId) return;
       if (!state.call.id || p.callId !== state.call.id) return;
       if (!state.call.peerId || p.fromId !== state.call.peerId) return;
-      if (!state.call.pc) return;
       if (!p.candidate) return;
       if (!state.call.pendingRemoteCandidates) state.call.pendingRemoteCandidates = [];
-      if (!state.call.pc.remoteDescription) {
+      if (!state.call.pc || !state.call.pc.remoteDescription) {
         state.call.pendingRemoteCandidates.push(p.candidate);
         return;
       }
