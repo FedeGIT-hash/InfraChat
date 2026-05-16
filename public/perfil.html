@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InfraChat · Perfil</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Inter:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+
+  <body>
+    <div class="viewport">
+      <section class="profile-page" aria-label="Mi perfil">
+        <header class="profile-topbar">
+          <a class="pill" href="/mensajes.html">Volver</a>
+          <div class="profile-title">Mi perfil</div>
+          <button class="pill" id="signOutBtn" type="button">Salir</button>
+        </header>
+
+        <div class="profile-shell">
+          <div class="profile-cover" id="coverBox">
+            <div class="profile-cover-overlay"></div>
+            <div class="profile-cover-actions">
+              <input id="coverInput" type="file" accept="image/*" />
+              <button class="btn" id="uploadCoverBtn" type="button">Subir portada</button>
+            </div>
+          </div>
+
+          <div class="profile-card">
+            <div class="profile-card-head">
+              <div class="avatar big" id="avatarBox">?</div>
+              <div class="profile-meta">
+                <div class="profile-username" id="usernameLine">Cargando…</div>
+                <div class="profile-sub" id="profileSub">Actualiza tu foto, portada y descripción</div>
+              </div>
+            </div>
+
+            <div class="profile-grid">
+              <div class="profile-uploader">
+                <input id="avatarInput" type="file" accept="image/*" />
+                <button class="btn" id="uploadAvatarBtn" type="button">Subir foto</button>
+              </div>
+
+              <label class="field">
+                <span>Descripción</span>
+                <textarea id="bioInput" rows="4" maxlength="160" placeholder="Escribe algo sobre ti…"></textarea>
+              </label>
+
+              <button class="btn primary" id="saveProfileBtn" type="button">Guardar</button>
+              <p class="hint" id="profileHint"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="/perfil.js"></script>
+  </body>
+</html>
+

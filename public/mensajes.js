@@ -22,15 +22,6 @@ const ui = {
   friendsList: el('friendsList'),
 
   profileBtn: el('profileBtn'),
-  profileModal: el('profileModal'),
-  profileBackdrop: el('profileBackdrop'),
-  closeProfileBtn: el('closeProfileBtn'),
-  profileAvatar: el('profileAvatar'),
-  avatarInput: el('avatarInput'),
-  uploadAvatarBtn: el('uploadAvatarBtn'),
-  bioInput: el('bioInput'),
-  saveProfileBtn: el('saveProfileBtn'),
-  profileHint: el('profileHint'),
 
   openSidebarBtn: el('openSidebarBtn'),
   closeSidebarBtn: el('closeSidebarBtn'),
@@ -626,8 +617,6 @@ async function loadProfile() {
     if (!error && data) {
       state.profile = data;
       ui.meLine.textContent = `@${data.username}`;
-      setAvatar(ui.profileAvatar, data.avatar_url, data.username);
-      ui.bioInput.value = data.bio || '';
       return;
     }
 
@@ -825,94 +814,6 @@ function closeSidebar() {
   document.querySelector('.app').classList.remove('sidebar-open');
 }
 
-function openProfile() {
-  setHint(ui.profileHint, '');
-  ui.profileModal.classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
-}
-
-function closeProfile() {
-  ui.profileModal.classList.add('hidden');
-  document.body.style.overflow = '';
-}
-
-async function saveProfile() {
-  const userId = state.session?.user?.id;
-  if (!userId) return;
-
-  const bio = String(ui.bioInput.value || '').trim();
-
-  const { error } = await state.supabase
-    .from('usuarios')
-    .update({ bio })
-    .eq('id', userId);
-
-  if (error) {
-    setHint(ui.profileHint, 'No se pudo guardar.', 'error');
-    return;
-  }
-
-  state.profile.bio = bio;
-  setHint(ui.profileHint, 'Guardado.', 'ok');
-}
-
-async function resizeImage(file, maxSize = 256) {
-  const bitmap = await createImageBitmap(file);
-  const ratio = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
-  const w = Math.max(1, Math.round(bitmap.width * ratio));
-  const h = Math.max(1, Math.round(bitmap.height * ratio));
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  const blob = await new Promise((resolve) => {
-    canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.86);
-  });
-  if (!blob) throw new Error('No se pudo procesar la imagen.');
-  return blob;
-}
-
-async function uploadAvatar() {
-  const userId = state.session?.user?.id;
-  if (!userId) return;
-
-  const file = ui.avatarInput.files?.[0] || null;
-  if (!file) {
-    setHint(ui.profileHint, 'Selecciona una imagen.', 'muted');
-    return;
-  }
-
-  ui.uploadAvatarBtn.disabled = true;
-  setHint(ui.profileHint, 'Subiendo…', 'muted');
-
-  try {
-    const blob = await resizeImage(file);
-    const path = `${userId}/avatar.jpg`;
-    const { error: upErr } = await state.supabase.storage
-      .from('avatars')
-      .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
-    if (upErr) throw upErr;
-
-    const { data } = state.supabase.storage.from('avatars').getPublicUrl(path);
-    const avatarUrl = `${data.publicUrl}?v=${Date.now()}`;
-
-    const { error: dbErr } = await state.supabase
-      .from('usuarios')
-      .update({ avatar_url: avatarUrl })
-      .eq('id', userId);
-    if (dbErr) throw dbErr;
-
-    state.profile.avatar_url = avatarUrl;
-    setAvatar(ui.profileAvatar, avatarUrl, state.profile.username);
-    setHint(ui.profileHint, 'Foto actualizada.', 'ok');
-  } catch {
-    setHint(ui.profileHint, 'No se pudo subir la foto. Revisa bucket/policies.', 'error');
-  } finally {
-    ui.uploadAvatarBtn.disabled = false;
-  }
-}
-
 function wireUi() {
   ui.searchUserBtn.addEventListener('click', async () => {
     await buscarUsuarioExacto();
@@ -956,12 +857,6 @@ function wireUi() {
     await state.supabase.auth.signOut();
     goToLogin();
   });
-
-  ui.profileBtn.addEventListener('click', openProfile);
-  ui.closeProfileBtn.addEventListener('click', closeProfile);
-  ui.profileBackdrop.addEventListener('click', closeProfile);
-  ui.saveProfileBtn.addEventListener('click', saveProfile);
-  ui.uploadAvatarBtn.addEventListener('click', uploadAvatar);
 
   ui.openSidebarBtn.addEventListener('click', openSidebar);
   ui.closeSidebarBtn.addEventListener('click', closeSidebar);
