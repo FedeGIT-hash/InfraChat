@@ -59,6 +59,7 @@ const state = {
   unreadByRoom: {},
   incomingCallsByPeer: {},
   callIgnoreIds: {},
+  callConnectTimer: null,
   call: {
     status: 'idle',
     id: null,
@@ -243,11 +244,14 @@ function callChannelName(callId) {
 }
 
 function cleanupCallState() {
+  if (state.callConnectTimer) clearTimeout(state.callConnectTimer);
+  state.callConnectTimer = null;
   if (state.call.pc) {
     try {
       state.call.pc.onicecandidate = null;
       state.call.pc.ontrack = null;
       state.call.pc.onconnectionstatechange = null;
+      state.call.pc.oniceconnectionstatechange = null;
       state.call.pc.close();
     } catch {
       return;
@@ -324,8 +328,12 @@ function isIgnoredCall(callId) {
 function rtcConfig() {
   return {
     iceServers: [
+      { urls: 'stun:stun.cloudflare.com:3478' },
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
     ],
   };
 }
@@ -421,7 +429,10 @@ function wirePeerConnection(pc) {
     const stream = ev.streams?.[0];
     if (!stream) return;
     state.call.remoteStream = stream;
-    if (ui.remoteAudio) ui.remoteAudio.srcObject = stream;
+    if (ui.remoteAudio) {
+      ui.remoteAudio.srcObject = stream;
+      void ui.remoteAudio.play();
+    }
   };
 
   pc.onconnectionstatechange = () => {
@@ -438,15 +449,66 @@ function wirePeerConnection(pc) {
       addSystemMessage(`Llamada finalizada con ${peer}.`);
     }
   };
+
+  pc.oniceconnectionstatechange = () => {
+    const s = pc.iceConnectionState;
+    if (s === 'checking') {
+      ui.callSub.textContent = 'Buscando ruta de conexión…';
+    } else if (s === 'connected' || s === 'completed') {
+      ui.callSub.textContent = 'En llamada';
+    } else if (s === 'disconnected') {
+      ui.callSub.textContent = 'Conexión inestable…';
+    } else if (s === 'failed') {
+      ui.callSub.textContent = 'No se pudo conectar';
+      showCallHint('La red bloqueó la conexión (NAT). Prueba datos móviles o otra Wi‑Fi.', 'error');
+    }
+  };
+}
+
+function normalizeCandidate(input) {
+  if (!input) return null;
+  if (typeof input === 'string') return { candidate: input };
+  if (typeof input !== 'object') return null;
+  if (input.candidate) {
+    const cand = String(input.candidate || '').trim();
+    if (!cand) return null;
+    return {
+      candidate: cand,
+      sdpMid: input.sdpMid ?? null,
+      sdpMLineIndex: input.sdpMLineIndex ?? null,
+      usernameFragment: input.usernameFragment ?? null,
+    };
+  }
+  return null;
 }
 
 async function safeAddIceCandidate(pc, candidate) {
   if (!pc || !candidate) return;
   try {
-    await pc.addIceCandidate(candidate);
+    const init = normalizeCandidate(candidate);
+    if (!init) return;
+    if (window.RTCIceCandidate) {
+      await pc.addIceCandidate(new RTCIceCandidate(init));
+      return;
+    }
+    await pc.addIceCandidate(init);
   } catch {
     return;
   }
+}
+
+function startCallConnectWatchdog() {
+  if (state.callConnectTimer) clearTimeout(state.callConnectTimer);
+  state.callConnectTimer = setTimeout(() => {
+    state.callConnectTimer = null;
+    if (!state.call.pc) return;
+    if (state.call.status === 'in_call') return;
+    const cs = state.call.pc.connectionState;
+    const is = state.call.pc.iceConnectionState;
+    if (cs === 'connected' || is === 'connected' || is === 'completed') return;
+    ui.callSub.textContent = 'No se pudo conectar';
+    showCallHint('No se pudo abrir ruta (NAT). Prueba datos móviles o otra red.', 'error');
+  }, 18_000);
 }
 
 async function flushPendingCandidates() {
@@ -578,6 +640,7 @@ async function startOutgoingCall() {
   state.call.localStream = localStream;
   wirePeerConnection(pc);
   for (const t of localStream.getTracks()) pc.addTrack(t, localStream);
+  startCallConnectWatchdog();
 
   const gathered = [];
   pc.onicecandidate = (ev) => {
@@ -662,6 +725,7 @@ async function acceptIncomingCall() {
   state.call.localStream = localStream;
   wirePeerConnection(pc);
   for (const t of localStream.getTracks()) pc.addTrack(t, localStream);
+  startCallConnectWatchdog();
 
   const gathered = [];
   pc.onicecandidate = (ev) => {
